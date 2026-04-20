@@ -1,13 +1,29 @@
 import { useEffect, useEffectEvent, useState } from 'react'
 import { supabase } from './lib/supabase'
 
+const CUSTOM_OPTION_VALUE = '__custom__'
+
+const LOCATION_OPTIONS = [
+  '교무실',
+  '교실',
+  '복도',
+  '상담실',
+  '복지실',
+  '급식실',
+  '직접입력',
+]
+
 const CATEGORY_OPTIONS = [
+  '교우관계',
   '학업',
   '진로',
-  '교우관계',
-  '생활태도',
-  '가정환경',
-  '직접 입력',
+  '정서',
+  '생활습관',
+  '가정',
+  '출결',
+  '건강',
+  '기타',
+  '직접입력',
 ]
 
 function getTodayDateString() {
@@ -25,10 +41,23 @@ function formatCounselingDate(dateString) {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
+      weekday: 'long',
     }).format(new Date(`${dateString}T00:00:00`))
   } catch {
     return dateString
   }
+}
+
+function formatTeacherLabel(teacherName) {
+  const trimmedTeacherName = String(teacherName ?? '').trim()
+
+  if (!trimmedTeacherName) {
+    return ''
+  }
+
+  return trimmedTeacherName.endsWith('선생님')
+    ? trimmedTeacherName
+    : `${trimmedTeacherName} 선생님`
 }
 
 async function copyTextToClipboard(text) {
@@ -89,26 +118,54 @@ function CounselingComposer({
   onSaveSuccess,
   onSaved,
   title = '새 상담 기록하기',
-  eyebrow = 'Counseling Form',
+  eyebrow = '',
 }) {
   const [date, setDate] = useState(getTodayDateString())
-  const [category, setCategory] = useState('학업')
-  const [customCategory, setCustomCategory] = useState('')
+  const [selectedLocationOption, setSelectedLocationOption] = useState('')
+  const [location, setLocation] = useState('')
+  const [selectedCategoryOption, setSelectedCategoryOption] = useState('')
+  const [category, setCategory] = useState('')
+  const [teacherName, setTeacherName] = useState('')
   const [content, setContent] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const { toastMessage, showToast } = useToast()
 
+  function handleLocationOptionChange(event) {
+    const nextValue = event.target.value
+    setSelectedLocationOption(nextValue)
+
+    if (nextValue === CUSTOM_OPTION_VALUE) {
+      setLocation('')
+      return
+    }
+
+    setLocation(nextValue)
+  }
+
+  function handleCategoryOptionChange(event) {
+    const nextValue = event.target.value
+    setSelectedCategoryOption(nextValue)
+
+    if (nextValue === CUSTOM_OPTION_VALUE) {
+      setCategory('')
+      return
+    }
+
+    setCategory(nextValue)
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
 
     if (!studentId || !supabase) {
-      setErrorMessage('학생을 먼저 선택한 뒤 상담 기록을 저장해 주세요.')
+      setErrorMessage('학생을 먼저 선택한 뒤 상담 기록을 작성해 주세요.')
       return
     }
 
-    const finalCategory =
-      category === '직접 입력' ? customCategory.trim() : category
+    const trimmedLocation = location.trim()
+    const trimmedCategory = category.trim()
+    const trimmedTeacherName = teacherName.trim()
     const trimmedContent = content.trim()
 
     if (!date) {
@@ -116,8 +173,18 @@ function CounselingComposer({
       return
     }
 
-    if (!finalCategory) {
+    if (!trimmedLocation) {
+      setErrorMessage('상담 장소를 입력해 주세요.')
+      return
+    }
+
+    if (!trimmedCategory) {
       setErrorMessage('상담 분야를 입력해 주세요.')
+      return
+    }
+
+    if (!trimmedTeacherName) {
+      setErrorMessage('상담 교사를 입력해 주세요.')
       return
     }
 
@@ -133,7 +200,9 @@ function CounselingComposer({
       {
         student_id: studentId,
         counseling_date: date,
-        category: finalCategory,
+        location: trimmedLocation,
+        category: trimmedCategory,
+        teacher_name: trimmedTeacherName,
         content: trimmedContent,
       },
     ])
@@ -145,8 +214,11 @@ function CounselingComposer({
     }
 
     setDate(getTodayDateString())
-    setCategory('학업')
-    setCustomCategory('')
+    setSelectedLocationOption('')
+    setLocation('')
+    setSelectedCategoryOption('')
+    setCategory('')
+    setTeacherName('')
     setContent('')
 
     onSaved?.()
@@ -163,56 +235,105 @@ function CounselingComposer({
       <section style={styles.card}>
         <div style={styles.panelHeader}>
           <div>
-            <p style={styles.historyEyebrow}>{eyebrow}</p>
+            {eyebrow ? <p style={styles.historyEyebrow}>{eyebrow}</p> : null}
             <h3 style={styles.title}>{title}</h3>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} style={styles.form}>
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>상담 날짜</label>
-            <input
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-              style={styles.input}
-              required
-            />
-          </div>
-
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>상담 분야</label>
-            <select
-              value={category}
-              onChange={(event) => setCategory(event.target.value)}
-              style={styles.input}
-            >
-              {CATEGORY_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {category === '직접 입력' ? (
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>직접 입력한 상담 분야</label>
+          <div style={styles.inlineFieldRow}>
+            <div style={{ ...styles.inputGroup, ...styles.inputGroupDate }}>
+              <label style={styles.label}>상담 날짜</label>
               <input
-                type="text"
-                placeholder="예: 진학 준비, 학부모 상담"
-                value={customCategory}
-                onChange={(event) => setCustomCategory(event.target.value)}
+                type="date"
+                value={date}
+                onChange={(event) => setDate(event.target.value)}
                 style={styles.input}
                 required
               />
             </div>
-          ) : null}
+
+            <div style={{ ...styles.inputGroup, ...styles.inputGroupLocation }}>
+              <label style={styles.label}>상담 장소</label>
+              <select
+                value={selectedLocationOption}
+                onChange={handleLocationOptionChange}
+                style={styles.input}
+                required
+              >
+                <option value="" disabled>
+                  상담 장소 선택
+                </option>
+                {LOCATION_OPTIONS.map((option) => (
+                  <option
+                    key={option}
+                    value={option === '직접입력' ? CUSTOM_OPTION_VALUE : option}
+                  >
+                    {option}
+                  </option>
+                ))}
+              </select>
+              {selectedLocationOption === CUSTOM_OPTION_VALUE ? (
+                <input
+                  type="text"
+                  placeholder="예: 교문 앞"
+                  value={location}
+                  onChange={(event) => setLocation(event.target.value)}
+                  style={styles.input}
+                  required
+                />
+              ) : null}
+            </div>
+
+            <div style={{ ...styles.inputGroup, ...styles.inputGroupCategory }}>
+              <label style={styles.label}>상담 분야</label>
+              <select
+                value={selectedCategoryOption}
+                onChange={handleCategoryOptionChange}
+                style={styles.input}
+                required
+              >
+                <option value="" disabled>
+                  상담 분야 선택
+                </option>
+                {CATEGORY_OPTIONS.map((option) => (
+                  <option
+                    key={option}
+                    value={option === '직접입력' ? CUSTOM_OPTION_VALUE : option}
+                  >
+                    {option}
+                  </option>
+                ))}
+              </select>
+              {selectedCategoryOption === CUSTOM_OPTION_VALUE ? (
+                <input
+                  type="text"
+                  placeholder="예: 진로"
+                  value={category}
+                  onChange={(event) => setCategory(event.target.value)}
+                  style={styles.input}
+                  required
+                />
+              ) : null}
+            </div>
+
+            <div style={{ ...styles.inputGroup, ...styles.inputGroupTeacher }}>
+              <label style={styles.label}>상담 교사</label>
+              <input
+                type="text"
+                placeholder="예: 홍길동"
+                value={teacherName}
+                onChange={(event) => setTeacherName(event.target.value)}
+                style={styles.input}
+                required
+              />
+            </div>
+          </div>
 
           <div style={styles.inputGroup}>
             <label style={styles.label}>상담 내용</label>
             <textarea
-              rows="7"
+              rows="4"
               placeholder="상담 내용을 자세히 입력해 주세요."
               value={content}
               onChange={(event) => setContent(event.target.value)}
@@ -241,14 +362,16 @@ function CounselingHistoryPanel({
   refreshKey = 0,
   summarySlot = null,
   showCountBadge = true,
-  title = '학생 상담 목록',
-  eyebrow = 'Counseling History',
+  variant = 'default',
+  title = '학생 상담 기록',
+  eyebrow = '',
   emptyMessage = '아직 등록된 상담 기록이 없습니다.',
 }) {
   const [records, setRecords] = useState([])
   const [isLoadingRecords, setIsLoadingRecords] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const { toastMessage, showToast } = useToast()
+  const isHomePreviewVariant = variant === 'home-preview'
 
   async function loadRecords(targetStudentId) {
     if (!targetStudentId || !supabase) {
@@ -261,7 +384,7 @@ function CounselingHistoryPanel({
 
     const { data, error } = await supabase
       .from('counseling_records')
-      .select('id, student_id, counseling_date, category, content')
+      .select('id, student_id, counseling_date, location, category, teacher_name, content')
       .eq('student_id', targetStudentId)
       .order('counseling_date', { ascending: false })
       .order('id', { ascending: false })
@@ -291,7 +414,11 @@ function CounselingHistoryPanel({
   }, [studentId, refreshKey])
 
   async function handleCopyForNeis(record) {
-    const copyTarget = `[${record.counseling_date}] (${record.category || '상담'}) ${record.content}`
+    const teacherLabel = formatTeacherLabel(record.teacher_name)
+    const metaParts = [teacherLabel, record.location, record.category].filter(Boolean)
+    const copyTarget = `[${record.counseling_date}]${
+      metaParts.length ? ` (${metaParts.join(' / ')})` : ''
+    } ${record.content}`
 
     try {
       await copyTextToClipboard(copyTarget)
@@ -312,9 +439,11 @@ function CounselingHistoryPanel({
             <h3 style={styles.historyTitle}>{title}</h3>
           </div>
 
-          {showCountBadge ? <div style={styles.historyActions}>
-            <span style={styles.countBadge}>{records.length}건</span>
-          </div> : null}
+          {showCountBadge ? (
+            <div style={styles.historyActions}>
+              <span style={styles.countBadge}>{records.length}건</span>
+            </div>
+          ) : null}
         </div>
 
         {summarySlot}
@@ -338,22 +467,75 @@ function CounselingHistoryPanel({
           <ul className="record-list">
             {records.map((record) => (
               <li className="record-item" key={record.id}>
-                <div style={styles.recordTopRow}>
-                  <div className="record-meta" style={styles.recordMetaInline}>
-                    <strong>{formatCounselingDate(record.counseling_date)}</strong>
-                    <span className="record-badge">
-                      {record.category || '상담 분야'}
-                    </span>
-                  </div>
+                {isHomePreviewVariant ? (
+                  <div style={styles.recordMetaStackHome}>
+                    <div style={styles.recordDateRowHome}>
+                      <strong style={styles.recordDateHome}>
+                        {formatCounselingDate(record.counseling_date)}
+                      </strong>
+                      {record.teacher_name ? (
+                        <span style={styles.recordTeacherMetaHome}>
+                          <span aria-hidden="true" style={styles.recordTeacherDivider} />
+                          <span style={styles.recordTeacher}>
+                            상담교사: {formatTeacherLabel(record.teacher_name)}
+                          </span>
+                        </span>
+                      ) : null}
+                    </div>
 
-                  <button
-                    type="button"
-                    style={styles.copyButton}
-                    onClick={() => handleCopyForNeis(record)}
-                  >
-                    나이스 복사
-                  </button>
-                </div>
+                    <div style={styles.recordActionRowHome}>
+                      {record.location ? (
+                        <span className="record-badge">{record.location}</span>
+                      ) : null}
+                      <span className="record-badge">
+                        {record.category || '상담 분야'}
+                      </span>
+
+                      <button
+                        type="button"
+                        style={styles.copyButton}
+                        onClick={() => handleCopyForNeis(record)}
+                      >
+                        나이스 복사
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={styles.recordTopRow}>
+                    <div style={styles.recordMetaBlock}>
+                      <div style={styles.recordDateRow}>
+                        <strong style={styles.recordDate}>
+                          {formatCounselingDate(record.counseling_date)}
+                        </strong>
+                        {record.teacher_name ? (
+                          <span style={styles.recordTeacherMeta}>
+                            <span aria-hidden="true" style={styles.recordTeacherDivider} />
+                            <span style={styles.recordTeacher}>
+                              상담교사: {formatTeacherLabel(record.teacher_name)}
+                            </span>
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div style={styles.recordActionRow}>
+                      {record.location ? (
+                        <span className="record-badge">{record.location}</span>
+                      ) : null}
+                      <span className="record-badge">
+                        {record.category || '상담 분야'}
+                      </span>
+
+                      <button
+                        type="button"
+                        style={styles.copyButton}
+                        onClick={() => handleCopyForNeis(record)}
+                      >
+                        나이스 복사
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <p className="record-content">{record.content}</p>
               </li>
@@ -370,13 +552,13 @@ function CounselingForm(props) {
 
   return (
     <div className="counseling-board" style={styles.combinedLayout}>
-      <CounselingHistoryPanel {...props} refreshKey={refreshKey} />
       <CounselingComposer
         {...props}
         onSaved={() => {
           setRefreshKey((previous) => previous + 1)
         }}
       />
+      <CounselingHistoryPanel {...props} refreshKey={refreshKey} />
     </div>
   )
 }
@@ -385,7 +567,7 @@ const styles = {
   combinedLayout: {
     display: 'grid',
     gap: '20px',
-    gridTemplateColumns: 'minmax(0, 1.08fr) minmax(320px, 0.92fr)',
+    gridTemplateColumns: 'minmax(0, 1fr)',
     alignItems: 'start',
   },
   wrapper: {
@@ -433,10 +615,32 @@ const styles = {
     flexDirection: 'column',
     gap: '16px',
   },
+  inlineFieldRow: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: '16px',
+    alignItems: 'start',
+  },
   inputGroup: {
     display: 'flex',
     flexDirection: 'column',
     gap: '8px',
+  },
+  inputGroupDate: {
+    minWidth: 0,
+    width: '100%',
+  },
+  inputGroupLocation: {
+    minWidth: 0,
+    width: '100%',
+  },
+  inputGroupCategory: {
+    minWidth: 0,
+    width: '100%',
+  },
+  inputGroupTeacher: {
+    minWidth: 0,
+    width: '100%',
   },
   label: {
     fontSize: '14px',
@@ -454,7 +658,7 @@ const styles = {
     outline: 'none',
   },
   textarea: {
-    minHeight: '196px',
+    minHeight: '98px',
     padding: '14px 16px',
     borderRadius: '16px',
     border: '1px solid rgba(148, 163, 184, 0.35)',
@@ -523,28 +727,6 @@ const styles = {
     fontSize: '14px',
     fontWeight: '700',
   },
-  softButton: {
-    minHeight: '38px',
-    padding: '0 14px',
-    borderRadius: '999px',
-    border: '1px solid rgba(148, 163, 184, 0.22)',
-    backgroundColor: '#f8fafc',
-    color: '#4e5968',
-    fontSize: '13px',
-    fontWeight: '700',
-    cursor: 'pointer',
-  },
-  softButtonDisabled: {
-    minHeight: '38px',
-    padding: '0 14px',
-    borderRadius: '999px',
-    border: '1px solid rgba(148, 163, 184, 0.18)',
-    backgroundColor: '#f8fafc',
-    color: '#a0a8b2',
-    fontSize: '13px',
-    fontWeight: '700',
-    cursor: 'not-allowed',
-  },
   copyButton: {
     minHeight: '34px',
     padding: '0 12px',
@@ -563,9 +745,78 @@ const styles = {
     justifyContent: 'space-between',
     gap: '12px',
   },
-  recordMetaInline: {
+  recordMetaBlock: {
+    display: 'grid',
+    gap: '8px',
     flex: '1 1 auto',
     minWidth: '0',
+  },
+  recordDateRow: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '8px',
+  },
+  recordDate: {
+    color: '#191f28',
+    fontSize: '16px',
+    fontWeight: '800',
+  },
+  recordMetaStackHome: {
+    display: 'grid',
+    gap: '10px',
+  },
+  recordDateRowHome: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr) auto',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  recordDateHome: {
+    color: '#191f28',
+    fontSize: '16px',
+    fontWeight: '800',
+    lineHeight: 1.35,
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  },
+  recordTeacherMeta: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  recordTeacherMetaHome: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifySelf: 'end',
+    gap: '10px',
+    whiteSpace: 'nowrap',
+  },
+  recordTeacherDivider: {
+    width: '1px',
+    alignSelf: 'stretch',
+    borderLeft: '2px dotted rgba(49, 130, 246, 0.45)',
+  },
+  recordTeacher: {
+    color: '#3182f6',
+    fontSize: '13px',
+    fontWeight: '800',
+    whiteSpace: 'nowrap',
+  },
+  recordActionRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: '8px',
+    flexShrink: 0,
+  },
+  recordActionRowHome: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    flexWrap: 'wrap',
+    gap: '8px',
   },
   emptyState: {
     display: 'grid',

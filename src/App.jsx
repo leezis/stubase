@@ -8,25 +8,25 @@ import {
   getFriendlyAvatarStudentUpdateErrorMessage,
   getFriendlyAvatarUploadErrorMessage,
 } from './lib/avatarUploadHelpers'
-import { hasSupabaseEnv, supabase } from './lib/supabase'
+import {
+  getSupabaseEnvHelpMessage,
+  hasSupabaseEnv,
+  supabase,
+} from './lib/supabase'
 
 const PAGE_SIZE = 20
 
-const GRADE_CHIP_OPTIONS = [
-  { label: '전체', value: '' },
-  { label: '1학년', value: '1' },
-  { label: '2학년', value: '2' },
-  { label: '3학년', value: '3' },
-]
-
-const CLASS_CHIP_OPTIONS = Array.from({ length: 7 }, (_, index) => ({
-  label: `${index + 1}반`,
-  value: String(index + 1),
-}))
+const CLASS_FILTER_OPTIONS = Array.from({ length: 3 }, (_, gradeIndex) =>
+  Array.from({ length: 7 }, (_, classIndex) => ({
+    label: `${gradeIndex + 1}-${classIndex + 1}`,
+    grade: String(gradeIndex + 1),
+    classNum: String(classIndex + 1),
+  })),
+).flat()
 
 const initialStatusMessage = hasSupabaseEnv
   ? '학생 데이터를 불러오는 중입니다.'
-  : '.env.local에서 Supabase 환경변수를 먼저 확인해 주세요.'
+  : getSupabaseEnvHelpMessage()
 
 const initialStudentFormValues = {
   name: '',
@@ -306,17 +306,25 @@ function App() {
   const authUserId = authUser?.id ?? ''
   const selectedStudentId = selectedStudent?.id ?? null
   const isStudentWorkspaceView =
-    activeView === 'home' || activeView === 'counseling'
+    activeView === 'home' ||
+    activeView === 'counseling' ||
+    activeView === 'student-create' ||
+    activeView === 'photo-matching'
   const nextRangeStartRef = useRef(0)
   const latestRequestIdRef = useRef(0)
   const counselingCountRequestIdRef = useRef(0)
   const loadMoreSentinelRef = useRef(null)
   const studentGridScrollRef = useRef(null)
   const detailColumnRef = useRef(null)
+  const managementMenuCloseTimeoutRef = useRef(null)
+  const pageRef = useRef(null)
+  const appHeaderRef = useRef(null)
+  const studentDiscoveryRef = useRef(null)
   const avatarFileInputRef = useRef(null)
   const avatarObjectUrlsRef = useRef({})
   const [isCounselingShortcutPending, setIsCounselingShortcutPending] =
     useState(false)
+  const [isManagementMenuOpen, setIsManagementMenuOpen] = useState(false)
 
   function resetStudentForm() {
     setFormValues(initialStudentFormValues)
@@ -339,12 +347,14 @@ function App() {
   function handleOpenHomeView() {
     setActiveView('home')
     setIsCounselingShortcutPending(false)
+    setIsManagementMenuOpen(false)
   }
 
   function handleOpenCounselingView() {
     const nextStudent = selectedStudent ?? students[0] ?? null
 
     setActiveView('counseling')
+    setIsManagementMenuOpen(false)
 
     if (nextStudent) {
       setSelectedStudent(nextStudent)
@@ -353,6 +363,57 @@ function App() {
     }
 
     setIsCounselingShortcutPending(true)
+  }
+
+  function handleOpenDashboardView() {
+    setActiveView('dashboard')
+    setIsCounselingShortcutPending(false)
+    setIsManagementMenuOpen(false)
+  }
+
+  function handleOpenStudentFormView() {
+    setActiveView('student-create')
+    setIsCounselingShortcutPending(false)
+    setIsManagementMenuOpen(false)
+  }
+
+  function handleOpenBatchUploadView() {
+    setActiveView('photo-matching')
+    setIsCounselingShortcutPending(false)
+    setIsManagementMenuOpen(false)
+  }
+
+  function clearManagementMenuCloseTimeout() {
+    if (managementMenuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(managementMenuCloseTimeoutRef.current)
+      managementMenuCloseTimeoutRef.current = null
+    }
+  }
+
+  function openManagementMenu() {
+    clearManagementMenuCloseTimeout()
+    setIsManagementMenuOpen(true)
+  }
+
+  function closeManagementMenu() {
+    clearManagementMenuCloseTimeout()
+    setIsManagementMenuOpen(false)
+  }
+
+  function scheduleCloseManagementMenu() {
+    clearManagementMenuCloseTimeout()
+    managementMenuCloseTimeoutRef.current = window.setTimeout(() => {
+      setIsManagementMenuOpen(false)
+      managementMenuCloseTimeoutRef.current = null
+    }, 260)
+  }
+
+  function handleManagementMenuBlur(event) {
+    if (event.currentTarget.contains(event.relatedTarget)) {
+      return
+    }
+
+    scheduleCloseManagementMenu()
   }
 
   const resetProtectedState = useEffectEvent(() => {
@@ -553,7 +614,7 @@ function App() {
 
   async function handleGoogleSignIn() {
     if (!supabase) {
-      setAuthErrorMessage('.env.local에서 Supabase 환경변수를 먼저 확인해 주세요.')
+      setAuthErrorMessage(getSupabaseEnvHelpMessage())
       return
     }
 
@@ -887,14 +948,12 @@ function App() {
     clearSelectedStudent()
   }
 
-  function handleGradeChipClick(nextGrade) {
-    setSelectedClass('')
-    setSelectedGrade(nextGrade)
-    clearSelectedStudent()
-  }
+  function handleClassChipClick(nextGrade, nextClass) {
+    const shouldReset =
+      selectedGrade === nextGrade && selectedClass === nextClass
 
-  function handleClassChipClick(nextClass) {
-    setSelectedClass(nextClass)
+    setSelectedGrade(shouldReset ? '' : nextGrade)
+    setSelectedClass(shouldReset ? '' : nextClass)
     clearSelectedStudent()
   }
 
@@ -995,6 +1054,67 @@ function App() {
     setIsSubmittingForm(false)
     await loadStudents({ reset: true, showRefreshState: true })
   }
+
+  useEffect(() => {
+    const pageElement = pageRef.current
+    if (!pageElement) {
+      return
+    }
+
+    let animationFrameId = 0
+
+    const syncStickyHeights = () => {
+      window.cancelAnimationFrame(animationFrameId)
+      animationFrameId = window.requestAnimationFrame(() => {
+        const nextHeaderHeight = Math.ceil(
+          appHeaderRef.current?.getBoundingClientRect().height ?? 88,
+        )
+        const nextDiscoveryHeight = Math.ceil(
+          studentDiscoveryRef.current?.getBoundingClientRect().height ?? 0,
+        )
+
+        pageElement.style.setProperty('--sticky-header-height', `${nextHeaderHeight}px`)
+        pageElement.style.setProperty(
+          '--sticky-discovery-height',
+          `${nextDiscoveryHeight}px`,
+        )
+      })
+    }
+
+    syncStickyHeights()
+    window.addEventListener('resize', syncStickyHeights)
+
+    if (typeof window.ResizeObserver !== 'function') {
+      return () => {
+        window.cancelAnimationFrame(animationFrameId)
+        window.removeEventListener('resize', syncStickyHeights)
+      }
+    }
+
+    const resizeObserver = new window.ResizeObserver(() => {
+      syncStickyHeights()
+    })
+
+    if (appHeaderRef.current) {
+      resizeObserver.observe(appHeaderRef.current)
+    }
+
+    if (studentDiscoveryRef.current) {
+      resizeObserver.observe(studentDiscoveryRef.current)
+    }
+
+    return () => {
+      window.cancelAnimationFrame(animationFrameId)
+      window.removeEventListener('resize', syncStickyHeights)
+      resizeObserver.disconnect()
+    }
+  }, [activeView, selectedGrade])
+
+  useEffect(() => {
+    return () => {
+      clearManagementMenuCloseTimeout()
+    }
+  }, [])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -1249,20 +1369,6 @@ function App() {
   const hasActiveFilters = Boolean(
     searchTerm.trim() || selectedGrade || selectedClass,
   )
-  const condensedGradeChipOptions = selectedGrade
-    ? [
-        { label: '전체', value: '' },
-        {
-          label:
-            GRADE_CHIP_OPTIONS.find((option) => option.value === selectedGrade)
-              ?.label ?? `${selectedGrade}학년`,
-          value: selectedGrade,
-        },
-      ]
-    : GRADE_CHIP_OPTIONS
-  const classFilterChipOptions = selectedGrade
-    ? [{ label: '전체반', value: '' }, ...CLASS_CHIP_OPTIONS]
-    : []
   const isCounselingView = activeView === 'counseling'
   const visibleSelectedStudent =
     students.find((student) => student.id === selectedStudentId) ?? null
@@ -1306,8 +1412,10 @@ function App() {
               {group.students.map((student) => (
                 <li
                   className={`student-grid__item student-grid__item--grade-${student.grade} ${
-                    selectedStudentId === student.id ? 'is-selected' : ''
-                  }`}
+                    isCounselingView
+                      ? 'student-grid__item--counseling'
+                      : 'student-grid__item--home'
+                  } ${selectedStudentId === student.id ? 'is-selected' : ''}`}
                   key={student.id}
                   role="button"
                   tabIndex={0}
@@ -1319,7 +1427,11 @@ function App() {
                     }
                   }}
                 >
-                  <div className="student-avatar student-grid__avatar">
+                  <div
+                    className={`student-avatar student-grid__avatar ${
+                      isCounselingView ? 'student-grid__avatar--counseling' : ''
+                    }`}
+                  >
                     {getDisplayedStudentAvatarSrc(student) ? (
                       <img
                         src={getDisplayedStudentAvatarSrc(student)}
@@ -1339,8 +1451,16 @@ function App() {
                     )}
                   </div>
 
-                  <div className="student-grid__content">
-                    <div className="student-grid__identity">
+                  <div
+                    className={`student-grid__content ${
+                      isCounselingView ? 'student-grid__content--counseling' : ''
+                    }`}
+                  >
+                    <div
+                      className={`student-grid__identity ${
+                        isCounselingView ? 'student-grid__identity--counseling' : ''
+                      }`}
+                    >
                       <p className="student-grid__school-number">
                         {formatSchoolNumber(student)}
                       </p>
@@ -1383,6 +1503,7 @@ function App() {
         eyebrow=""
         title="상담 내역"
         showCountBadge={false}
+        variant="home-preview"
         summarySlot={
           previewStudent ? (
             <section
@@ -1431,11 +1552,140 @@ function App() {
     </div>
   )
 
+  const studentFormSection = (
+    <section className="form-card">
+      <div className="card-header form-header">
+        <div>
+          <p className="section-label">Create Student</p>
+          <h2>{isEditing ? '학생 수정' : '학생 추가'}</h2>
+          <p className="form-description">
+            학생 추가, 수정, 삭제 이후에도 목록과 검색 결과가 자연스럽게
+            갱신되도록 구성했습니다.
+          </p>
+        </div>
+
+        <div className="form-header-actions">
+          {isEditing ? (
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={resetStudentForm}
+              disabled={isBusy}
+            >
+              수정 취소
+            </button>
+          ) : null}
+
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={handleAddTestStudent}
+            disabled={isBusy}
+          >
+            {isCreatingTest ? '추가 중...' : '테스트 학생 추가하기'}
+          </button>
+        </div>
+      </div>
+
+      <form className="student-form" onSubmit={handleSubmitStudent} noValidate>
+        <div className="form-grid">
+          <label className="field">
+            <span className="field-label">이름</span>
+            <input
+              className={`field-input ${formErrors.name ? 'is-error' : ''}`}
+              name="name"
+              type="text"
+              value={formValues.name}
+              onChange={handleStudentInputChange}
+              placeholder="예: 김지우"
+              autoComplete="off"
+            />
+            <span className={`field-message ${formErrors.name ? 'is-error' : ''}`}>
+              {formErrors.name || '학생 이름을 입력해 주세요.'}
+            </span>
+          </label>
+
+          <label className="field">
+            <span className="field-label">학년</span>
+            <input
+              className={`field-input ${formErrors.grade ? 'is-error' : ''}`}
+              name="grade"
+              type="text"
+              inputMode="numeric"
+              value={formValues.grade}
+              onChange={handleStudentInputChange}
+              placeholder="예: 1"
+              autoComplete="off"
+            />
+            <span className={`field-message ${formErrors.grade ? 'is-error' : ''}`}>
+              {formErrors.grade || '1부터 99 사이 숫자를 입력해 주세요.'}
+            </span>
+          </label>
+
+          <label className="field">
+            <span className="field-label">반</span>
+            <input
+              className={`field-input ${formErrors.classNum ? 'is-error' : ''}`}
+              name="classNum"
+              type="text"
+              inputMode="numeric"
+              value={formValues.classNum}
+              onChange={handleStudentInputChange}
+              placeholder="예: 3"
+              autoComplete="off"
+            />
+            <span className={`field-message ${formErrors.classNum ? 'is-error' : ''}`}>
+              {formErrors.classNum || '1부터 99 사이 숫자를 입력해 주세요.'}
+            </span>
+          </label>
+
+          <label className="field">
+            <span className="field-label">번호</span>
+            <input
+              className={`field-input ${formErrors.studentNum ? 'is-error' : ''}`}
+              name="studentNum"
+              type="text"
+              inputMode="numeric"
+              value={formValues.studentNum}
+              onChange={handleStudentInputChange}
+              placeholder="예: 12"
+              autoComplete="off"
+            />
+            <span className={`field-message ${formErrors.studentNum ? 'is-error' : ''}`}>
+              {formErrors.studentNum || '1부터 99 사이 숫자를 입력해 주세요.'}
+            </span>
+          </label>
+        </div>
+
+        <div className="form-footer">
+          <p className="form-note">같은 학년, 반, 번호 조합은 한 번만 등록할 수 있습니다.</p>
+          <button className="primary-button" type="submit" disabled={isBusy}>
+            {isSubmittingForm
+              ? isEditing
+                ? '학생 수정 중...'
+                : '학생 추가 중...'
+              : isEditing
+                ? '학생 수정'
+                : '학생 추가'}
+          </button>
+        </div>
+      </form>
+    </section>
+  )
+
+  const batchUploadSection = (
+    <BatchAvatarUpload
+      authUserId={authUserId}
+      onAvatarUpdated={updateStudentAvatarState}
+      onStatusMessage={setStatusMessage}
+    />
+  )
+
   if (!hasSupabaseEnv) {
     return (
       <main className="page page--auth">
         <Login
-          errorMessage=".env.local??Supabase ?섍꼍蹂?섎? 癒쇱? ?뺤씤??二쇱꽭??"
+          errorMessage={getSupabaseEnvHelpMessage()}
           isSigningIn={false}
           hasSupabaseEnv={false}
           onGoogleSignIn={handleGoogleSignIn}
@@ -1480,7 +1730,7 @@ function App() {
           <p className="hero-badge">Student Dashboard</p>
           <h1>학생 목록과 상담 기록을 한 번에 관리해요</h1>
           <p className="hero-copy">
-            검색, 학년 필터, 무한 스크롤 기반 목록으로 많은 학생 데이터도 빠르게
+            검색, 학급 선택, 무한 스크롤 기반 목록으로 많은 학생 데이터도 빠르게
             확인할 수 있도록 구성했습니다.
           </p>
         </div>
@@ -1497,7 +1747,7 @@ function App() {
         </div>
       </section>
 
-      <section className="student-discovery">
+      <section className="student-discovery" ref={studentDiscoveryRef}>
         <div className="student-discovery__inner">
           <div className="student-discovery__filters student-discovery__filters--inline">
             <div className="student-discovery__filter-block student-discovery__filter-block--grade">
@@ -1506,210 +1756,40 @@ function App() {
                   <span className="student-discovery__title-icon" aria-hidden="true">
                     📚
                   </span>
-                  <span className="student-discovery__title-text">학년필터</span>
+                  <span className="student-discovery__title-text">학급선택</span>
                 </h2>
                 <div
-                  className={`chip-row chip-row--grade-inline ${
-                    selectedGrade ? 'chip-row--grade-selected' : 'chip-row--grade'
-                  }`}
+                  className="chip-row chip-row--class-picker"
                   role="tablist"
-                  aria-label="학년 필터"
+                  aria-label="학급 선택"
                 >
-                  {condensedGradeChipOptions.map((option) => (
+                  {CLASS_FILTER_OPTIONS.map((option) => (
                     <button
-                      key={option.value || 'all'}
-                      className={`chip-button ${
-                        option.value
-                          ? `chip-button--grade-${option.value}`
-                          : 'chip-button--all'
-                      } ${
-                        selectedGrade === option.value ||
-                        (!selectedGrade && option.value === '') ? 'is-active' : ''
+                      key={`${option.grade}-${option.classNum}`}
+                      className={`chip-button chip-button--grade-${option.grade} ${
+                        selectedGrade === option.grade && selectedClass === option.classNum
+                          ? 'is-active'
+                          : ''
                       }`}
                       type="button"
-                      onClick={() => handleGradeChipClick(option.value)}
+                      onClick={() => handleClassChipClick(option.grade, option.classNum)}
                     >
                       {option.label}
                     </button>
                   ))}
-
-                  <button
-                    className="chip-button chip-button--reset"
-                    type="button"
-                    onClick={resetFilters}
-                    disabled={!hasActiveFilters}
-                  >
-                    필터 초기화
-                  </button>
                 </div>
               </div>
             </div>
-
-            {selectedGrade ? (
-              <div className="student-discovery__filter-block student-discovery__filter-block--class">
-                <span className="visually-hidden">{selectedGrade}학년 반 필터</span>
-                <div
-                  className="chip-row chip-row--class chip-row--class-inline"
-                  role="tablist"
-                  aria-label={`${selectedGrade}학년 반 필터`}
-                >
-                  {classFilterChipOptions.map((option) => (
-                    <button
-                      key={option.value || 'all-class'}
-                      className={`chip-button ${
-                        selectedClass === option.value ||
-                        (!selectedClass && option.value === '') ? 'is-active' : ''
-                      }`}
-                      type="button"
-                      onClick={() => handleClassChipClick(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
       </section>
 
-      <div className={`workspace ${isCounselingView ? '' : 'workspace--home'}`}>
+      <div
+        className={`workspace ${
+          isCounselingView ? 'workspace--counseling' : 'workspace--home'
+        }`}
+      >
         <div className="main-column">
-          <section className="form-card">
-            <div className="card-header form-header">
-              <div>
-                <p className="section-label">Create Student</p>
-                <h2>{isEditing ? '학생 수정' : '학생 추가'}</h2>
-                <p className="form-description">
-                  학생 추가, 수정, 삭제 이후에도 목록과 검색 결과가 자연스럽게
-                  갱신되도록 구성했습니다.
-                </p>
-              </div>
-
-              <div className="form-header-actions">
-                {isEditing ? (
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={resetStudentForm}
-                    disabled={isBusy}
-                  >
-                    수정 취소
-                  </button>
-                ) : null}
-
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={handleAddTestStudent}
-                  disabled={isBusy}
-                >
-                  {isCreatingTest ? '추가 중...' : '테스트 학생 추가하기'}
-                </button>
-              </div>
-            </div>
-
-            <form className="student-form" onSubmit={handleSubmitStudent} noValidate>
-              <div className="form-grid">
-                <label className="field">
-                  <span className="field-label">이름</span>
-                  <input
-                    className={`field-input ${formErrors.name ? 'is-error' : ''}`}
-                    name="name"
-                    type="text"
-                    value={formValues.name}
-                    onChange={handleStudentInputChange}
-                    placeholder="예: 김지우"
-                    autoComplete="off"
-                  />
-                  <span
-                    className={`field-message ${formErrors.name ? 'is-error' : ''}`}
-                  >
-                    {formErrors.name || '학생 이름을 입력해 주세요.'}
-                  </span>
-                </label>
-
-                <label className="field">
-                  <span className="field-label">학년</span>
-                  <input
-                    className={`field-input ${formErrors.grade ? 'is-error' : ''}`}
-                    name="grade"
-                    type="text"
-                    inputMode="numeric"
-                    value={formValues.grade}
-                    onChange={handleStudentInputChange}
-                    placeholder="예: 1"
-                    autoComplete="off"
-                  />
-                  <span
-                    className={`field-message ${formErrors.grade ? 'is-error' : ''}`}
-                  >
-                    {formErrors.grade || '1부터 99 사이 숫자를 입력해 주세요.'}
-                  </span>
-                </label>
-
-                <label className="field">
-                  <span className="field-label">반</span>
-                  <input
-                    className={`field-input ${formErrors.classNum ? 'is-error' : ''}`}
-                    name="classNum"
-                    type="text"
-                    inputMode="numeric"
-                    value={formValues.classNum}
-                    onChange={handleStudentInputChange}
-                    placeholder="예: 3"
-                    autoComplete="off"
-                  />
-                  <span
-                    className={`field-message ${formErrors.classNum ? 'is-error' : ''}`}
-                  >
-                    {formErrors.classNum || '1부터 99 사이 숫자를 입력해 주세요.'}
-                  </span>
-                </label>
-
-                <label className="field">
-                  <span className="field-label">번호</span>
-                  <input
-                    className={`field-input ${formErrors.studentNum ? 'is-error' : ''}`}
-                    name="studentNum"
-                    type="text"
-                    inputMode="numeric"
-                    value={formValues.studentNum}
-                    onChange={handleStudentInputChange}
-                    placeholder="예: 12"
-                    autoComplete="off"
-                  />
-                  <span
-                    className={`field-message ${formErrors.studentNum ? 'is-error' : ''}`}
-                  >
-                    {formErrors.studentNum || '1부터 99 사이 숫자를 입력해 주세요.'}
-                  </span>
-                </label>
-              </div>
-
-              <div className="form-footer">
-                <p className="form-note">
-                  같은 학년, 반, 번호 조합은 한 번만 등록할 수 있습니다.
-                </p>
-                <button className="primary-button" type="submit" disabled={isBusy}>
-                  {isSubmittingForm
-                    ? isEditing
-                      ? '학생 수정 중...'
-                      : '학생 추가 중...'
-                    : isEditing
-                      ? '학생 수정'
-                      : '학생 추가'}
-                </button>
-              </div>
-            </form>
-          </section>
-
-          <BatchAvatarUpload
-            authUserId={authUserId}
-            onAvatarUpdated={updateStudentAvatarState}
-            onStatusMessage={setStatusMessage}
-          />
-
           {isLoading && !hasVisibleStudents ? (
             isCounselingView ? (
               <section className="list-card">
@@ -1751,8 +1831,7 @@ function App() {
               <div className="empty-icon">+</div>
               <h2>아직 등록된 학생이 없습니다</h2>
               <p>
-                입력 폼으로 첫 학생을 추가하거나 테스트 학생 추가하기 버튼으로 바로
-                연결 상태를 확인해 보세요.
+                상단 학생관리 메뉴의 학생 추가에서 첫 학생을 등록해 보세요.
               </p>
             </section>
           ) : null}
@@ -1761,10 +1840,7 @@ function App() {
             <section className="empty-card">
               <div className="empty-icon">0</div>
               <h2>조건에 맞는 학생이 없습니다</h2>
-              <p>검색어를 조금 다르게 입력하거나 학년 필터를 바꿔 보세요.</p>
-              <button className="ghost-button" type="button" onClick={resetFilters}>
-                필터 초기화
-              </button>
+              <p>검색어를 조금 다르게 입력하거나 학급 선택을 다시 확인해 보세요.</p>
             </section>
           ) : null}
 
@@ -1840,15 +1916,10 @@ function App() {
                       />
 
                       <div className="detail-profile__copy">
-                        <p className="section-label">Counseling Panel</p>
-                        <h2>{selectedStudent.name} 학생 상담</h2>
-                        <p className="detail-subtitle">
-                          {formatStudentLabel(selectedStudent)}
-                        </p>
-                        <p className="detail-avatar-note">
-                          사진을 클릭하거나 카메라 버튼을 눌러 프로필 사진을 업로드할
-                          수 있습니다.
-                        </p>
+                        <h2>
+                          {selectedStudent.grade}학년 {selectedStudent.class_num}반{' '}
+                          {selectedStudent.student_num}번 {selectedStudent.name}
+                        </h2>
                       </div>
                     </div>
 
@@ -1873,10 +1944,7 @@ function App() {
 
                   <section className="detail-section">
                     <div className="section-row">
-                      <div>
-                        <p className="section-label">Counseling Form</p>
-                        <h3 className="detail-title">상담 입력과 기록 보기</h3>
-                      </div>
+                      <div />
                     </div>
 
                     <p className="detail-note">
@@ -1900,9 +1968,21 @@ function App() {
     </>
   )
 
+  const studentCreateView = (
+    <div className="workspace workspace--home">
+      <div className="main-column">{studentFormSection}</div>
+    </div>
+  )
+
+  const photoMatchingView = (
+    <div className="workspace workspace--home">
+      <div className="main-column">{batchUploadSection}</div>
+    </div>
+  )
+
   return (
-    <main className="page">
-      <section className="app-header">
+    <main className="page" ref={pageRef}>
+      <section className="app-header" ref={appHeaderRef}>
         <div className="app-header__identity">
           <span className="school-logo" aria-hidden="true">
             👨‍👩‍👧‍👦
@@ -1922,24 +2002,117 @@ function App() {
             >
               홈
             </button>
-            <button
-              className={`app-header__nav-button ${
-                activeView === 'counseling' ? 'is-active' : ''
+
+            <div
+              className={`app-header__nav-dropdown ${
+                isManagementMenuOpen ? 'is-open' : ''
               }`}
-              type="button"
-              onClick={handleOpenCounselingView}
+              onMouseEnter={openManagementMenu}
+              onMouseLeave={scheduleCloseManagementMenu}
+              onFocus={openManagementMenu}
+              onBlur={handleManagementMenuBlur}
             >
-              학생상담
-            </button>
-            <button
-              className={`app-header__nav-button ${
-                activeView === 'dashboard' ? 'is-active' : ''
-              }`}
-              type="button"
-              onClick={() => setActiveView('dashboard')}
-            >
-              상담통계
-            </button>
+              <button
+                className={`app-header__nav-button app-header__nav-button--dropdown ${
+                  isManagementMenuOpen ||
+                  activeView === 'counseling' ||
+                  activeView === 'dashboard' ||
+                  activeView === 'student-create' ||
+                  activeView === 'photo-matching'
+                    ? 'is-active'
+                    : ''
+                }`}
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={isManagementMenuOpen}
+                onClick={() => {
+                  if (isManagementMenuOpen) {
+                    closeManagementMenu()
+                  } else {
+                    openManagementMenu()
+                  }
+                }}
+              >
+                <span>학생관리</span>
+                <span className="app-header__nav-chevron" aria-hidden="true" />
+              </button>
+
+              <div className="app-header__mega-menu" role="menu" aria-label="학생관리 메뉴">
+                <div className="app-header__mega-menu-grid">
+                  <button
+                    className="app-header__mega-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closeManagementMenu()
+                      handleOpenCounselingView()
+                    }}
+                  >
+                    <span className="app-header__mega-item-icon" aria-hidden="true">
+                      상
+                    </span>
+                    <span className="app-header__mega-item-copy">
+                      <strong>학생상담</strong>
+                      <span>학생별 상담 입력과 기록 확인</span>
+                    </span>
+                  </button>
+
+                  <button
+                    className="app-header__mega-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closeManagementMenu()
+                      handleOpenDashboardView()
+                    }}
+                  >
+                    <span className="app-header__mega-item-icon" aria-hidden="true">
+                      통
+                    </span>
+                    <span className="app-header__mega-item-copy">
+                      <strong>상담통계</strong>
+                      <span>전체 상담 현황과 분야별 추이 보기</span>
+                    </span>
+                  </button>
+
+                  <button
+                    className="app-header__mega-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closeManagementMenu()
+                      handleOpenStudentFormView()
+                    }}
+                  >
+                    <span className="app-header__mega-item-icon" aria-hidden="true">
+                      추
+                    </span>
+                    <span className="app-header__mega-item-copy">
+                      <strong>학생 추가</strong>
+                      <span>신규 학생 등록과 정보 수정</span>
+                    </span>
+                  </button>
+
+                  <button
+                    className="app-header__mega-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closeManagementMenu()
+                      handleOpenBatchUploadView()
+                    }}
+                  >
+                    <span className="app-header__mega-item-icon" aria-hidden="true">
+                      사
+                    </span>
+                    <span className="app-header__mega-item-copy">
+                      <strong>사진 매칭</strong>
+                      <span>프로필 사진 일괄 업로드와 매칭</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </nav>
         </div>
 
@@ -1985,7 +2158,13 @@ function App() {
         </div>
       </section>
 
-      {activeView === 'dashboard' ? <Dashboard /> : studentView}
+      {activeView === 'dashboard'
+        ? <Dashboard />
+        : activeView === 'student-create'
+          ? studentCreateView
+          : activeView === 'photo-matching'
+            ? photoMatchingView
+            : studentView}
     </main>
   )
 }

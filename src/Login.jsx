@@ -1,7 +1,9 @@
 import dongsuyeongSchoolLogo from './assets/dongsuyeong-school-logo.svg'
+import { getSupabaseEnvHelpMessage } from './lib/supabase'
 
 function Login({ errorMessage, isSigningIn, hasSupabaseEnv, onGoogleSignIn }) {
   const isDisabled = !hasSupabaseEnv || isSigningIn
+  const envHelpMessage = getSupabaseEnvHelpMessage()
 
   return (
     <section className="auth-shell">
@@ -27,7 +29,7 @@ function Login({ errorMessage, isSigningIn, hasSupabaseEnv, onGoogleSignIn }) {
           <p className="auth-note">
             {hasSupabaseEnv
               ? 'Google 계정으로 로그인하면 학생 목록과 상담 기록을 안전하게 확인할 수 있습니다.'
-              : '.env.local의 Supabase 환경변수를 먼저 확인해 주세요.'}
+              : envHelpMessage}
           </p>
         </div>
 

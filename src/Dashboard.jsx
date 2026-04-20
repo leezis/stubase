@@ -6,7 +6,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts'
-import { hasSupabaseEnv, supabase } from './lib/supabase'
+import { getSupabaseEnvHelpMessage, hasSupabaseEnv, supabase } from './lib/supabase'
 
 const CHART_COLORS = [
   '#8dbbff',
@@ -86,9 +86,7 @@ function Dashboard() {
       <section className="empty-card">
         <div className="empty-icon">!</div>
         <h2>통계 대시보드를 열기 전에 Supabase 연결이 필요합니다</h2>
-        <p>
-          <code>.env.local</code> 환경변수 설정을 먼저 확인해 주세요.
-        </p>
+        <p>{getSupabaseEnvHelpMessage()}</p>
       </section>
     )
   }
