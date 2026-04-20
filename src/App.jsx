@@ -15,6 +15,7 @@ import {
 } from './lib/supabase'
 
 const PAGE_SIZE = 20
+const APP_BUILD_LABEL = 'build 2026-04-21 b1'
 
 const CLASS_FILTER_OPTIONS = Array.from({ length: 3 }, (_, gradeIndex) =>
   Array.from({ length: 7 }, (_, classIndex) => ({
@@ -1990,6 +1991,7 @@ function App() {
 
           <div className="app-header__brand">
             <h2>학생관리</h2>
+            <span className="app-header__build-badge">{APP_BUILD_LABEL}</span>
           </div>
 
           <nav className="app-header__nav" aria-label="주요 화면 이동">
