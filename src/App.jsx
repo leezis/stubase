@@ -16,6 +16,7 @@ import {
 
 const PAGE_SIZE = 20
 const APP_BUILD_LABEL = 'build 2026-04-21 b1'
+const PRODUCTION_SITE_URL = 'https://stubase.pages.dev/'
 
 const CLASS_FILTER_OPTIONS = Array.from({ length: 3 }, (_, gradeIndex) =>
   Array.from({ length: 7 }, (_, classIndex) => ({
@@ -120,6 +121,28 @@ function normalizeSearchKeyword(value) {
     .trim()
     .replace(/[,%()]/g, ' ')
     .replace(/\s+/g, ' ')
+}
+
+function getAuthRedirectUrl() {
+  if (typeof window === 'undefined') {
+    return PRODUCTION_SITE_URL
+  }
+
+  const { hostname, origin } = window.location
+
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+    return `${origin}/`
+  }
+
+  if (hostname === 'stubase.pages.dev') {
+    return `${origin}/`
+  }
+
+  if (hostname.endsWith('.stubase.pages.dev')) {
+    return PRODUCTION_SITE_URL
+  }
+
+  return `${origin}/`
 }
 
 function parseSchoolNumberKeyword(value) {
@@ -625,7 +648,7 @@ function App() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin,
+        redirectTo: getAuthRedirectUrl(),
       },
     })
 
