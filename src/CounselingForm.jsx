@@ -112,6 +112,16 @@ function ToastMessage({ message }) {
   )
 }
 
+function getCounselingRecordErrorMessage(action, error) {
+  const rawMessage = error?.message ?? ''
+
+  if (rawMessage.includes('row-level security policy') && action === 'update') {
+    return '수정 권한 정책이 아직 없습니다. Supabase SQL Editor에서 update policy를 추가해 주세요.'
+  }
+
+  return rawMessage || '처리 중 오류가 발생했습니다.'
+}
+
 function CounselingComposer({
   studentId,
   studentName,
@@ -368,6 +378,9 @@ function CounselingHistoryPanel({
   emptyMessage = '아직 등록된 상담 기록이 없습니다.',
 }) {
   const [records, setRecords] = useState([])
+  const [editingRecordId, setEditingRecordId] = useState(null)
+  const [editingContent, setEditingContent] = useState('')
+  const [updatingRecordId, setUpdatingRecordId] = useState(null)
   const [isLoadingRecords, setIsLoadingRecords] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const { toastMessage, showToast } = useToast()
@@ -404,6 +417,9 @@ function CounselingHistoryPanel({
   })
 
   useEffect(() => {
+    setEditingRecordId(null)
+    setEditingContent('')
+
     const timeoutId = window.setTimeout(() => {
       runLoadRecords(studentId)
     }, 0)
@@ -426,6 +442,59 @@ function CounselingHistoryPanel({
     } catch {
       showToast('복사에 실패했습니다. 다시 시도해 주세요.')
     }
+  }
+
+  function handleStartEdit(record) {
+    setEditingRecordId(record.id)
+    setEditingContent(record.content ?? '')
+    setErrorMessage('')
+  }
+
+  function handleCancelEdit() {
+    setEditingRecordId(null)
+    setEditingContent('')
+    setErrorMessage('')
+  }
+
+  async function handleUpdateContent(record) {
+    if (!studentId || !supabase) {
+      setErrorMessage('학생을 먼저 선택한 뒤 상담 기록을 수정해 주세요.')
+      return
+    }
+
+    const trimmedContent = editingContent.trim()
+
+    if (!trimmedContent) {
+      setErrorMessage('상담 내용을 입력해 주세요.')
+      return
+    }
+
+    setUpdatingRecordId(record.id)
+    setErrorMessage('')
+
+    const { error } = await supabase
+      .from('counseling_records')
+      .update({ content: trimmedContent })
+      .eq('id', record.id)
+      .eq('student_id', studentId)
+
+    if (error) {
+      setErrorMessage(getCounselingRecordErrorMessage('update', error))
+      setUpdatingRecordId(null)
+      return
+    }
+
+    setRecords((previousRecords) =>
+      previousRecords.map((previousRecord) =>
+        previousRecord.id === record.id
+          ? { ...previousRecord, content: trimmedContent }
+          : previousRecord,
+      ),
+    )
+    setEditingRecordId(null)
+    setEditingContent('')
+    setUpdatingRecordId(null)
+    showToast('상담 내용이 수정되었습니다.')
   }
 
   return (
@@ -533,11 +602,59 @@ function CounselingHistoryPanel({
                       >
                         나이스 복사
                       </button>
+
                     </div>
                   </div>
                 )}
 
-                <p className="record-content">{record.content}</p>
+                {editingRecordId === record.id ? (
+                  <div style={styles.contentEditArea}>
+                    <textarea
+                      rows="4"
+                      value={editingContent}
+                      onChange={(event) => setEditingContent(event.target.value)}
+                      style={styles.contentEditTextarea}
+                      aria-label="상담 내용 수정"
+                    />
+                    <div style={styles.contentEditActions}>
+                      <button
+                        type="button"
+                        style={
+                          updatingRecordId === record.id
+                            ? styles.contentSaveButtonDisabled
+                            : styles.contentSaveButton
+                        }
+                        disabled={updatingRecordId === record.id}
+                        onClick={() => handleUpdateContent(record)}
+                      >
+                        {updatingRecordId === record.id ? '저장 중...' : '저장'}
+                      </button>
+                      <button
+                        type="button"
+                        style={styles.contentCancelButton}
+                        disabled={updatingRecordId === record.id}
+                        onClick={handleCancelEdit}
+                      >
+                        취소
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <p className="record-content">{record.content}</p>
+                    {!isHomePreviewVariant ? (
+                      <div style={styles.recordContentActions}>
+                        <button
+                          type="button"
+                          style={styles.contentEditTriggerButton}
+                          onClick={() => handleStartEdit(record)}
+                        >
+                          상담 내용 수정
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -738,6 +855,81 @@ const styles = {
     fontWeight: '700',
     cursor: 'pointer',
     whiteSpace: 'nowrap',
+  },
+  recordContentActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    marginTop: '12px',
+  },
+  contentEditTriggerButton: {
+    minHeight: '38px',
+    padding: '0 16px',
+    borderRadius: '999px',
+    border: '1px solid rgba(49, 130, 246, 0.24)',
+    backgroundColor: '#ffffff',
+    color: '#3182f6',
+    fontSize: '13px',
+    fontWeight: '800',
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+  },
+  contentEditArea: {
+    display: 'grid',
+    gap: '10px',
+    marginTop: '12px',
+  },
+  contentEditTextarea: {
+    minHeight: '112px',
+    width: '100%',
+    padding: '14px 16px',
+    borderRadius: '16px',
+    border: '1px solid rgba(49, 130, 246, 0.28)',
+    backgroundColor: '#ffffff',
+    color: '#191f28',
+    fontSize: '15px',
+    lineHeight: 1.65,
+    outline: 'none',
+    resize: 'vertical',
+    fontFamily: 'inherit',
+  },
+  contentEditActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '8px',
+    flexWrap: 'wrap',
+  },
+  contentSaveButton: {
+    minHeight: '36px',
+    padding: '0 14px',
+    borderRadius: '999px',
+    border: 'none',
+    backgroundColor: '#3182f6',
+    color: '#ffffff',
+    fontSize: '13px',
+    fontWeight: '800',
+    cursor: 'pointer',
+  },
+  contentSaveButtonDisabled: {
+    minHeight: '36px',
+    padding: '0 14px',
+    borderRadius: '999px',
+    border: 'none',
+    backgroundColor: '#b0d1ff',
+    color: '#ffffff',
+    fontSize: '13px',
+    fontWeight: '800',
+    cursor: 'not-allowed',
+  },
+  contentCancelButton: {
+    minHeight: '36px',
+    padding: '0 14px',
+    borderRadius: '999px',
+    border: '1px solid rgba(148, 163, 184, 0.26)',
+    backgroundColor: '#f8fafc',
+    color: '#4e5968',
+    fontSize: '13px',
+    fontWeight: '800',
+    cursor: 'pointer',
   },
   recordTopRow: {
     display: 'flex',

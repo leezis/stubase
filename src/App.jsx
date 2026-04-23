@@ -2074,7 +2074,7 @@ function App() {
                     }}
                   >
                     <span className="app-header__mega-item-icon" aria-hidden="true">
-                      상
+                      📒
                     </span>
                     <span className="app-header__mega-item-copy">
                       <strong>학생상담</strong>
@@ -2092,7 +2092,7 @@ function App() {
                     }}
                   >
                     <span className="app-header__mega-item-icon" aria-hidden="true">
-                      통
+                      📚
                     </span>
                     <span className="app-header__mega-item-copy">
                       <strong>상담통계</strong>
@@ -2110,7 +2110,7 @@ function App() {
                     }}
                   >
                     <span className="app-header__mega-item-icon" aria-hidden="true">
-                      추
+                      🧑
                     </span>
                     <span className="app-header__mega-item-copy">
                       <strong>학생 추가</strong>
@@ -2128,7 +2128,7 @@ function App() {
                     }}
                   >
                     <span className="app-header__mega-item-icon" aria-hidden="true">
-                      사
+                      📷
                     </span>
                     <span className="app-header__mega-item-copy">
                       <strong>사진 매칭</strong>
