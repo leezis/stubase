@@ -6,6 +6,7 @@ import {
 import { supabase } from './lib/supabase'
 
 const BATCH_SIZE = 5
+const STUDENT_MATCH_FETCH_PAGE_SIZE = 1000
 
 function buildStudentMatchKey(grade, classNum, studentNum) {
   return `${grade}-${classNum}-${studentNum}`
@@ -92,6 +93,34 @@ function createBatchEntry(file, index, studentMap) {
   }
 }
 
+async function fetchAllStudentsForMatching() {
+  const students = []
+  let rangeStart = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('students')
+      .select('id, name, grade, class_num, student_num')
+      .order('grade', { ascending: true })
+      .order('class_num', { ascending: true })
+      .order('student_num', { ascending: true })
+      .range(rangeStart, rangeStart + STUDENT_MATCH_FETCH_PAGE_SIZE - 1)
+
+    if (error) {
+      return { data: null, error }
+    }
+
+    const nextChunk = data ?? []
+    students.push(...nextChunk)
+
+    if (nextChunk.length < STUDENT_MATCH_FETCH_PAGE_SIZE) {
+      return { data: students, error: null }
+    }
+
+    rangeStart += STUDENT_MATCH_FETCH_PAGE_SIZE
+  }
+}
+
 function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
   const fileInputRef = useRef(null)
 
@@ -104,6 +133,10 @@ function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
 
   const totalCount = entries.length
   const matchedEntries = entries.filter((entry) => entry.student)
+  const uploadableEntries = entries.filter(
+    (entry) =>
+      entry.student && (entry.status === 'ready' || entry.status === 'failed'),
+  )
   const unmatchedEntries = entries.filter((entry) => entry.status === 'unmatched')
   const completedEntries = entries.filter((entry) => entry.status === 'completed')
   const failedEntries = entries.filter((entry) => entry.status === 'failed')
@@ -142,10 +175,7 @@ function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
     setLocalErrorMessage('')
     onStatusMessage?.(`${nextFiles.length}개 사진 파일을 분석하는 중입니다.`)
 
-    const { data, error } = await supabase
-      .from('students')
-      .select('id, name, grade, class_num, student_num')
-      .range(0, 999)
+    const { data, error } = await fetchAllStudentsForMatching()
 
     if (error) {
       setEntries([])
@@ -178,7 +208,7 @@ function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
   }
 
   async function processSingleEntry(entry) {
-    if (!supabase || !entry.student) {
+    if (!supabase || !entry.student || entry.status === 'completed') {
       return 'failed'
     }
 
@@ -241,7 +271,7 @@ function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
   }
 
   async function handleStartUpload() {
-    if (!matchedEntries.length || !supabase || !authUserId) {
+    if (!uploadableEntries.length || !supabase || !authUserId) {
       return
     }
 
@@ -249,14 +279,14 @@ function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
     setPhase('uploading')
     setLocalErrorMessage('')
     onStatusMessage?.(
-      `일괄 업로드를 시작했습니다. 총 ${matchedEntries.length}개 매칭 파일을 처리합니다.`,
+      `일괄 업로드를 시작했습니다. 총 ${uploadableEntries.length}개 매칭 파일을 처리합니다.`,
     )
 
     let successCount = 0
     let failureCount = 0
 
-    for (let startIndex = 0; startIndex < matchedEntries.length; startIndex += BATCH_SIZE) {
-      const chunk = matchedEntries.slice(startIndex, startIndex + BATCH_SIZE)
+    for (let startIndex = 0; startIndex < uploadableEntries.length; startIndex += BATCH_SIZE) {
+      const chunk = uploadableEntries.slice(startIndex, startIndex + BATCH_SIZE)
       const results = await Promise.all(chunk.map((entry) => processSingleEntry(entry)))
 
       results.forEach((result) => {
@@ -332,7 +362,7 @@ function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
             className="primary-button"
             type="button"
             onClick={handleStartUpload}
-            disabled={isPreparing || isProcessing || !matchedEntries.length}
+            disabled={isPreparing || isProcessing || !uploadableEntries.length}
           >
             {isProcessing ? '업로드 진행 중..' : '일괄 업로드 시작'}
           </button>

@@ -15,6 +15,7 @@ import {
 } from './lib/supabase'
 
 const PAGE_SIZE = 20
+const COUNSELING_COUNT_PAGE_SIZE = 1000
 const APP_BUILD_LABEL = 'build 2026-04-21 b1'
 const PRODUCTION_SITE_URL = 'https://stubase.pages.dev/'
 
@@ -45,10 +46,6 @@ const AVATAR_THEMES = [
   { background: '#e9f7f7', color: '#0f9c9c' },
   { background: '#fff0f6', color: '#d6336c' },
 ]
-
-function formatStudentLabel(student) {
-  return `${student.grade}학년 ${student.class_num}반 ${student.student_num}번 · 학번 ${formatSchoolNumber(student)}`
-}
 
 function formatSchoolNumber(student) {
   return `${student.grade}${student.class_num}${String(student.student_num).padStart(2, '0')}`
@@ -358,14 +355,6 @@ function App() {
 
   function clearSelectedStudent() {
     setSelectedStudent(null)
-  }
-
-  function resetFilters() {
-    setSearchTerm('')
-    setDebouncedSearchTerm('')
-    setSelectedGrade('')
-    setSelectedClass('')
-    clearSelectedStudent()
   }
 
   function handleOpenHomeView() {
@@ -896,6 +885,9 @@ function App() {
   }
 
   function _handleEditStudent(student) {
+    setActiveView('student-create')
+    setIsCounselingShortcutPending(false)
+    setIsManagementMenuOpen(false)
     setEditingStudentId(student.id)
     setErrorMessage('')
     setFormErrors({})
@@ -1343,28 +1335,43 @@ function App() {
 
       for (let index = 0; index < studentIds.length; index += chunkSize) {
         const chunk = studentIds.slice(index, index + chunkSize)
+        let rangeStart = 0
 
-        const { data, error } = await supabase
-          .from('counseling_records')
-          .select('student_id')
-          .in('student_id', chunk)
+        while (true) {
+          const { data, error } = await supabase
+            .from('counseling_records')
+            .select('student_id')
+            .in('student_id', chunk)
+            .range(
+              rangeStart,
+              rangeStart + COUNSELING_COUNT_PAGE_SIZE - 1,
+            )
 
-        if (!isMounted || requestId !== counselingCountRequestIdRef.current) {
-          return
-        }
-
-        if (error) {
-          setCounselingCountMap({})
-          return
-        }
-
-        for (const record of data ?? []) {
-          const studentId = record.student_id
-          if (!studentId) {
-            continue
+          if (!isMounted || requestId !== counselingCountRequestIdRef.current) {
+            return
           }
 
-          nextCountMap[studentId] = (nextCountMap[studentId] ?? 0) + 1
+          if (error) {
+            setCounselingCountMap({})
+            return
+          }
+
+          const nextRecords = data ?? []
+
+          for (const record of nextRecords) {
+            const studentId = record.student_id
+            if (!studentId) {
+              continue
+            }
+
+            nextCountMap[studentId] = (nextCountMap[studentId] ?? 0) + 1
+          }
+
+          if (nextRecords.length < COUNSELING_COUNT_PAGE_SIZE) {
+            break
+          }
+
+          rangeStart += COUNSELING_COUNT_PAGE_SIZE
         }
       }
 
@@ -1493,6 +1500,31 @@ function App() {
                     <span className="student-grid__count">
                       상담 {counselingCountMap[student.id] ?? 0}회
                     </span>
+                  </div>
+
+                  <div
+                    className="student-grid__actions"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  >
+                    <button
+                      className="student-grid__action-button"
+                      type="button"
+                      onClick={() => _handleEditStudent(student)}
+                      disabled={isBusy}
+                    >
+                      수정
+                    </button>
+                    <button
+                      className="student-grid__action-button is-danger"
+                      type="button"
+                      onClick={() => {
+                        void _handleDeleteStudent(student)
+                      }}
+                      disabled={isBusy}
+                    >
+                      삭제
+                    </button>
                   </div>
                 </li>
               ))}

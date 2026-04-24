@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from 'react'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 import { supabase } from './lib/supabase'
 
 const CUSTOM_OPTION_VALUE = '__custom__'
@@ -385,10 +385,15 @@ function CounselingHistoryPanel({
   const [errorMessage, setErrorMessage] = useState('')
   const { toastMessage, showToast } = useToast()
   const isHomePreviewVariant = variant === 'home-preview'
+  const recordsRequestIdRef = useRef(0)
 
   async function loadRecords(targetStudentId) {
+    const requestId = recordsRequestIdRef.current + 1
+    recordsRequestIdRef.current = requestId
+
     if (!targetStudentId || !supabase) {
       setRecords([])
+      setIsLoadingRecords(false)
       return
     }
 
@@ -401,6 +406,10 @@ function CounselingHistoryPanel({
       .eq('student_id', targetStudentId)
       .order('counseling_date', { ascending: false })
       .order('id', { ascending: false })
+
+    if (requestId !== recordsRequestIdRef.current) {
+      return
+    }
 
     if (error) {
       setRecords([])
@@ -417,10 +426,9 @@ function CounselingHistoryPanel({
   })
 
   useEffect(() => {
-    setEditingRecordId(null)
-    setEditingContent('')
-
     const timeoutId = window.setTimeout(() => {
+      setEditingRecordId(null)
+      setEditingContent('')
       runLoadRecords(studentId)
     }, 0)
 

@@ -16,6 +16,32 @@ const CHART_COLORS = [
   '#d6e4fb',
   '#b9c7e6',
 ]
+const DASHBOARD_FETCH_PAGE_SIZE = 1000
+
+async function fetchAllCounselingRecordCategories() {
+  const records = []
+  let rangeStart = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('counseling_records')
+      .select('category')
+      .range(rangeStart, rangeStart + DASHBOARD_FETCH_PAGE_SIZE - 1)
+
+    if (error) {
+      return { data: null, error }
+    }
+
+    const nextChunk = data ?? []
+    records.push(...nextChunk)
+
+    if (nextChunk.length < DASHBOARD_FETCH_PAGE_SIZE) {
+      return { data: records, error: null }
+    }
+
+    rangeStart += DASHBOARD_FETCH_PAGE_SIZE
+  }
+}
 
 function Dashboard() {
   const [isLoading, setIsLoading] = useState(hasSupabaseEnv)
@@ -31,9 +57,7 @@ function Dashboard() {
     setIsLoading(true)
     setErrorMessage('')
 
-    const { data, error } = await supabase
-      .from('counseling_records')
-      .select('id, category')
+    const { data, error } = await fetchAllCounselingRecordCategories()
 
     if (error) {
       setTotalCount(0)
