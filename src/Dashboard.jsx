@@ -17,15 +17,17 @@ const CHART_COLORS = [
   '#b9c7e6',
 ]
 const DASHBOARD_FETCH_PAGE_SIZE = 1000
+const DASHBOARD_GRADES = [1, 2, 3]
+const DASHBOARD_CLASSES = Array.from({ length: 7 }, (_, index) => index + 1)
 
-async function fetchAllCounselingRecordCategories() {
+async function fetchAllRows(tableName, selectColumns) {
   const records = []
   let rangeStart = 0
 
   while (true) {
     const { data, error } = await supabase
-      .from('counseling_records')
-      .select('category')
+      .from(tableName)
+      .select(selectColumns)
       .range(rangeStart, rangeStart + DASHBOARD_FETCH_PAGE_SIZE - 1)
 
     if (error) {
@@ -43,11 +45,97 @@ async function fetchAllCounselingRecordCategories() {
   }
 }
 
+function createEmptyGradeClassStats() {
+  return DASHBOARD_GRADES.map((grade) => ({
+    grade,
+    totalValue: 0,
+    classes: DASHBOARD_CLASSES.map((classNum) => ({
+      classNum,
+      value: 0,
+    })),
+  }))
+}
+
+function createGradeClassStats(records, students) {
+  const studentClassMap = new Map(
+    students.map((student) => [
+      student.id,
+      {
+        grade: Number(student.grade),
+        classNum: Number(student.class_num),
+      },
+    ]),
+  )
+  const gradeClassCountMap = new Map()
+
+  records.forEach((record) => {
+    const studentClass = studentClassMap.get(record.student_id)
+
+    if (
+      !studentClass ||
+      !DASHBOARD_GRADES.includes(studentClass.grade) ||
+      !DASHBOARD_CLASSES.includes(studentClass.classNum)
+    ) {
+      return
+    }
+
+    const classKey = `${studentClass.grade}-${studentClass.classNum}`
+    gradeClassCountMap.set(
+      classKey,
+      (gradeClassCountMap.get(classKey) ?? 0) + 1,
+    )
+  })
+
+  return DASHBOARD_GRADES.map((grade) => {
+    const classes = DASHBOARD_CLASSES.map((classNum) => ({
+      classNum,
+      value: gradeClassCountMap.get(`${grade}-${classNum}`) ?? 0,
+    }))
+
+    return {
+      grade,
+      totalValue: classes.reduce(
+        (total, classStat) => total + classStat.value,
+        0,
+      ),
+      classes,
+    }
+  })
+}
+
+function getDashboardErrorMessage(error) {
+  const rawMessage = error?.message ?? ''
+
+  if (rawMessage.includes('counseling_records')) {
+    return '상담 기록 데이터를 불러오지 못했습니다. Supabase 설정을 확인해 주세요.'
+  }
+
+  if (rawMessage.includes('students')) {
+    return '학생 데이터를 불러오지 못했습니다. Supabase 설정을 확인해 주세요.'
+  }
+
+  return rawMessage || '상담 통계를 불러오지 못했습니다.'
+}
+
+function getGradeTotalValue(gradeStat) {
+  if (Number.isFinite(gradeStat.totalValue)) {
+    return gradeStat.totalValue
+  }
+
+  return (gradeStat.classes ?? []).reduce(
+    (total, classStat) => total + (Number(classStat.value) || 0),
+    0,
+  )
+}
+
 function Dashboard() {
   const [isLoading, setIsLoading] = useState(hasSupabaseEnv)
   const [errorMessage, setErrorMessage] = useState('')
   const [totalCount, setTotalCount] = useState(0)
   const [categoryStats, setCategoryStats] = useState([])
+  const [gradeClassStats, setGradeClassStats] = useState(
+    createEmptyGradeClassStats,
+  )
 
   async function loadDashboardData() {
     if (!supabase) {
@@ -57,17 +145,23 @@ function Dashboard() {
     setIsLoading(true)
     setErrorMessage('')
 
-    const { data, error } = await fetchAllCounselingRecordCategories()
+    const [recordsResult, studentsResult] = await Promise.all([
+      fetchAllRows('counseling_records', 'student_id, category'),
+      fetchAllRows('students', 'id, grade, class_num'),
+    ])
+    const error = recordsResult.error ?? studentsResult.error
 
     if (error) {
       setTotalCount(0)
       setCategoryStats([])
-      setErrorMessage(error.message)
+      setGradeClassStats(createEmptyGradeClassStats())
+      setErrorMessage(getDashboardErrorMessage(error))
       setIsLoading(false)
       return
     }
 
-    const nextRecords = data ?? []
+    const nextRecords = recordsResult.data ?? []
+    const nextStudents = studentsResult.data ?? []
     const categoryCountMap = nextRecords.reduce((accumulator, record) => {
       const categoryName = String(record.category ?? '').trim() || '미분류'
       accumulator[categoryName] = (accumulator[categoryName] ?? 0) + 1
@@ -84,6 +178,7 @@ function Dashboard() {
 
     setTotalCount(nextRecords.length)
     setCategoryStats(nextCategoryStats)
+    setGradeClassStats(createGradeClassStats(nextRecords, nextStudents))
     setIsLoading(false)
   }
 
@@ -121,24 +216,16 @@ function Dashboard() {
     <section className="dashboard-shell">
       <div className="dashboard-header-card">
         <div>
-          <p className="hero-badge">Department Dashboard</p>
           <h1>부서 보고용 통계 대시보드</h1>
-          <p className="hero-copy">
-            counseling_records 전체 데이터를 바탕으로 이번 학기 상담 현황을 한눈에
-            볼 수 있게 정리했습니다.
-          </p>
         </div>
       </div>
 
       <div className="dashboard-summary-grid">
-        <section className="dashboard-card dashboard-card--emphasis">
-          <p className="dashboard-card-label">이번 학기 총 상담 건수</p>
+        <section className="dashboard-card dashboard-card--emphasis dashboard-total-card">
+          <p className="dashboard-card-label">총 상담 건수</p>
           <strong className="dashboard-card-value">
             {isLoading ? '집계 중' : `${totalCount}건`}
           </strong>
-          <p className="dashboard-card-note">
-            counseling_records 테이블의 전체 상담 건수를 집계했습니다.
-          </p>
         </section>
 
         <section className="dashboard-card">
@@ -146,9 +233,6 @@ function Dashboard() {
           <strong className="dashboard-card-value">
             {isLoading ? '-' : `${categoryStats.length}개`}
           </strong>
-          <p className="dashboard-card-note">
-            학업, 진로, 교우관계 등 현재 누적된 분야 기준입니다.
-          </p>
         </section>
       </div>
 
@@ -159,103 +243,144 @@ function Dashboard() {
       ) : null}
 
       {!errorMessage ? (
-        <div className="dashboard-grid">
-          <section className="dashboard-card dashboard-chart-card">
-            <div className="dashboard-section-header">
-              <div>
-                <p className="section-label">Pie Chart</p>
-                <h2>분야별 상담 통계</h2>
-              </div>
-            </div>
+        <>
+          <div className="dashboard-grade-grid">
+            {gradeClassStats.map((gradeStat) => {
+              const gradeTotalValue = getGradeTotalValue(gradeStat)
 
-            {isLoading ? (
-              <div className="record-skeleton-list" aria-hidden="true">
-                <div className="record-skeleton" />
-                <div className="record-skeleton" />
-              </div>
-            ) : null}
-
-            {!isLoading && !hasStats ? (
-              <div className="dashboard-empty">
-                <p>아직 집계할 상담 데이터가 없습니다.</p>
-              </div>
-            ) : null}
-
-            {!isLoading && hasStats ? (
-              <div className="dashboard-chart-wrap">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryStats}
-                      dataKey="value"
-                      nameKey="name"
-                      innerRadius={76}
-                      outerRadius={122}
-                      paddingAngle={3}
-                      stroke="none"
+              return (
+                <section
+                  className={`dashboard-card dashboard-grade-card dashboard-grade-card--grade-${gradeStat.grade}`}
+                  key={gradeStat.grade}
+                >
+                  <h2>{gradeStat.grade}학년 전체 학급 상담 현황</h2>
+                  <ul className="dashboard-class-list">
+                    {gradeStat.classes.map((classStat) => (
+                      <li
+                        className={`dashboard-class-item dashboard-class-item--grade-${gradeStat.grade}`}
+                        key={`${gradeStat.grade}-${classStat.classNum}`}
+                      >
+                        <strong className="dashboard-class-name">
+                          {gradeStat.grade}-{classStat.classNum}
+                        </strong>
+                        <span className="dashboard-class-total">
+                          상담 {isLoading ? '-' : `${classStat.value}건`}
+                        </span>
+                      </li>
+                    ))}
+                    <li
+                      className={`dashboard-class-item dashboard-class-item--grade-${gradeStat.grade} dashboard-class-item--total`}
+                      key={`${gradeStat.grade}-total`}
                     >
-                      {categoryStats.map((entry) => (
-                        <Cell key={entry.name} fill={entry.fill} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value) => [`${value}건`, '상담 건수']}
-                      contentStyle={{
-                        borderRadius: 16,
-                        border: '1px solid rgba(229, 233, 240, 0.98)',
-                        boxShadow: '0 12px 30px rgba(15, 23, 42, 0.08)',
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            ) : null}
-          </section>
-
-          <section className="dashboard-card">
-            <div className="dashboard-section-header">
-              <div>
-                <p className="section-label">Breakdown</p>
-                <h2>분야별 누적 건수</h2>
-              </div>
-            </div>
-
-            {isLoading ? (
-              <div className="record-skeleton-list" aria-hidden="true">
-                <div className="record-skeleton" />
-                <div className="record-skeleton" />
-              </div>
-            ) : null}
-
-            {!isLoading && !hasStats ? (
-              <div className="dashboard-empty">
-                <p>상담 데이터가 들어오면 여기에 분야별 통계가 표시됩니다.</p>
-              </div>
-            ) : null}
-
-            {!isLoading && hasStats ? (
-              <ul className="dashboard-breakdown-list">
-                {categoryStats.map((item) => (
-                  <li className="dashboard-breakdown-item" key={item.name}>
-                    <div
-                      className="dashboard-breakdown-dot"
-                      style={{ backgroundColor: item.fill }}
-                    />
-                    <div className="dashboard-breakdown-main">
-                      <strong>{item.name}</strong>
-                      <span>
-                        {Math.round((item.value / totalCount) * 100)}%
+                      <strong className="dashboard-class-name dashboard-class-name--total">
+                        전체학급
+                      </strong>
+                      <span className="dashboard-class-total">
+                        상담 {isLoading ? '-' : `${gradeTotalValue}건`}
                       </span>
-                    </div>
-                    <span className="dashboard-breakdown-value">
-                      {item.value}건
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </section>
-        </div>
+                    </li>
+                  </ul>
+                </section>
+              )
+            })}
+          </div>
+
+          <div className="dashboard-grid">
+            <section className="dashboard-card dashboard-chart-card">
+              <div className="dashboard-section-header">
+                <div>
+                  <h2>분야별 상담 통계</h2>
+                </div>
+              </div>
+
+              {isLoading ? (
+                <div className="record-skeleton-list" aria-hidden="true">
+                  <div className="record-skeleton" />
+                  <div className="record-skeleton" />
+                </div>
+              ) : null}
+
+              {!isLoading && !hasStats ? (
+                <div className="dashboard-empty">
+                  <p>아직 집계할 상담 데이터가 없습니다.</p>
+                </div>
+              ) : null}
+
+              {!isLoading && hasStats ? (
+                <div className="dashboard-chart-wrap">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={categoryStats}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={76}
+                        outerRadius={122}
+                        paddingAngle={3}
+                        stroke="none"
+                      >
+                        {categoryStats.map((entry) => (
+                          <Cell key={entry.name} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value) => [`${value}건`, '상담 건수']}
+                        contentStyle={{
+                          borderRadius: 16,
+                          border: '1px solid rgba(229, 233, 240, 0.98)',
+                          boxShadow: '0 12px 30px rgba(15, 23, 42, 0.08)',
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : null}
+            </section>
+
+            <section className="dashboard-card">
+              <div className="dashboard-section-header">
+                <div>
+                  <h2>분야별 누적 건수</h2>
+                </div>
+              </div>
+
+              {isLoading ? (
+                <div className="record-skeleton-list" aria-hidden="true">
+                  <div className="record-skeleton" />
+                  <div className="record-skeleton" />
+                </div>
+              ) : null}
+
+              {!isLoading && !hasStats ? (
+                <div className="dashboard-empty">
+                  <p>상담 데이터가 들어오면 여기에 분야별 통계가 표시됩니다.</p>
+                </div>
+              ) : null}
+
+              {!isLoading && hasStats ? (
+                <ul className="dashboard-breakdown-list">
+                  {categoryStats.map((item) => (
+                    <li className="dashboard-breakdown-item" key={item.name}>
+                      <div
+                        className="dashboard-breakdown-dot"
+                        style={{ backgroundColor: item.fill }}
+                      />
+                      <div className="dashboard-breakdown-main">
+                        <strong>{item.name}</strong>
+                        <span>
+                          {Math.round((item.value / totalCount) * 100)}%
+                        </span>
+                      </div>
+                      <span className="dashboard-breakdown-value">
+                        {item.value}건
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          </div>
+        </>
       ) : null}
     </section>
   )

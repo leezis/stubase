@@ -376,10 +376,13 @@ function CounselingHistoryPanel({
   title = '학생 상담 기록',
   eyebrow = '',
   emptyMessage = '아직 등록된 상담 기록이 없습니다.',
+  expandedRecordId = null,
+  onRecordOpen,
 }) {
   const [records, setRecords] = useState([])
   const [editingRecordId, setEditingRecordId] = useState(null)
   const [editingContent, setEditingContent] = useState('')
+  const [expandedRecordIds, setExpandedRecordIds] = useState({})
   const [updatingRecordId, setUpdatingRecordId] = useState(null)
   const [isLoadingRecords, setIsLoadingRecords] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
@@ -429,13 +432,14 @@ function CounselingHistoryPanel({
     const timeoutId = window.setTimeout(() => {
       setEditingRecordId(null)
       setEditingContent('')
+      setExpandedRecordIds(expandedRecordId ? { [expandedRecordId]: true } : {})
       runLoadRecords(studentId)
     }, 0)
 
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [studentId, refreshKey])
+  }, [studentId, refreshKey, expandedRecordId])
 
   async function handleCopyForNeis(record) {
     const teacherLabel = formatTeacherLabel(record.teacher_name)
@@ -453,6 +457,7 @@ function CounselingHistoryPanel({
   }
 
   function handleStartEdit(record) {
+    setExpandedRecordIds((previous) => ({ ...previous, [record.id]: true }))
     setEditingRecordId(record.id)
     setEditingContent(record.content ?? '')
     setErrorMessage('')
@@ -462,6 +467,22 @@ function CounselingHistoryPanel({
     setEditingRecordId(null)
     setEditingContent('')
     setErrorMessage('')
+  }
+
+  function toggleRecordExpansion(recordId) {
+    setExpandedRecordIds((previous) => ({
+      ...previous,
+      [recordId]: !previous[recordId],
+    }))
+  }
+
+  function handleRecordMetaClick(record) {
+    if (isHomePreviewVariant) {
+      onRecordOpen?.(record)
+      return
+    }
+
+    toggleRecordExpansion(record.id)
   }
 
   async function handleUpdateContent(record) {
@@ -480,11 +501,13 @@ function CounselingHistoryPanel({
     setUpdatingRecordId(record.id)
     setErrorMessage('')
 
-    const { error } = await supabase
+    const { data: updatedRecord, error } = await supabase
       .from('counseling_records')
       .update({ content: trimmedContent })
       .eq('id', record.id)
       .eq('student_id', studentId)
+      .select('id, student_id, counseling_date, location, category, teacher_name, content')
+      .maybeSingle()
 
     if (error) {
       setErrorMessage(getCounselingRecordErrorMessage('update', error))
@@ -492,10 +515,18 @@ function CounselingHistoryPanel({
       return
     }
 
+    if (!updatedRecord) {
+      setErrorMessage(
+        '상담 기록이 수정되지 않았습니다. Supabase SQL Editor에서 상담 기록 update policy가 적용되어 있는지 확인해 주세요.',
+      )
+      setUpdatingRecordId(null)
+      return
+    }
+
     setRecords((previousRecords) =>
       previousRecords.map((previousRecord) =>
         previousRecord.id === record.id
-          ? { ...previousRecord, content: trimmedContent }
+          ? { ...previousRecord, ...updatedRecord }
           : previousRecord,
       ),
     )
@@ -542,23 +573,34 @@ function CounselingHistoryPanel({
 
         {records.length ? (
           <ul className="record-list">
-            {records.map((record) => (
+            {records.map((record) => {
+              const isRecordExpanded =
+                Boolean(expandedRecordIds[record.id]) ||
+                editingRecordId === record.id
+
+              return (
               <li className="record-item" key={record.id}>
                 {isHomePreviewVariant ? (
                   <div style={styles.recordMetaStackHome}>
-                    <div style={styles.recordDateRowHome}>
-                      <strong style={styles.recordDateHome}>
-                        {formatCounselingDate(record.counseling_date)}
-                      </strong>
-                      {record.teacher_name ? (
-                        <span style={styles.recordTeacherMetaHome}>
-                          <span aria-hidden="true" style={styles.recordTeacherDivider} />
-                          <span style={styles.recordTeacher}>
-                            상담교사: {formatTeacherLabel(record.teacher_name)}
+                    <button
+                      type="button"
+                      style={styles.recordMetaButtonHome}
+                      onClick={() => handleRecordMetaClick(record)}
+                    >
+                      <span style={styles.recordDateRowHome}>
+                        <strong style={styles.recordDateHome}>
+                          {formatCounselingDate(record.counseling_date)}
+                        </strong>
+                        {record.teacher_name ? (
+                          <span style={styles.recordTeacherMetaHome}>
+                            <span aria-hidden="true" style={styles.recordTeacherDivider} />
+                            <span style={styles.recordTeacher}>
+                              상담교사: {formatTeacherLabel(record.teacher_name)}
+                            </span>
                           </span>
-                        </span>
-                      ) : null}
-                    </div>
+                        ) : null}
+                      </span>
+                    </button>
 
                     <div style={styles.recordActionRowHome}>
                       {record.location ? (
@@ -579,7 +621,12 @@ function CounselingHistoryPanel({
                   </div>
                 ) : (
                   <div style={styles.recordTopRow}>
-                    <div style={styles.recordMetaBlock}>
+                    <button
+                      type="button"
+                      style={styles.recordMetaButton}
+                      onClick={() => handleRecordMetaClick(record)}
+                      aria-expanded={isRecordExpanded}
+                    >
                       <div style={styles.recordDateRow}>
                         <strong style={styles.recordDate}>
                           {formatCounselingDate(record.counseling_date)}
@@ -593,7 +640,7 @@ function CounselingHistoryPanel({
                           </span>
                         ) : null}
                       </div>
-                    </div>
+                    </button>
 
                     <div style={styles.recordActionRow}>
                       {record.location ? (
@@ -615,56 +662,59 @@ function CounselingHistoryPanel({
                   </div>
                 )}
 
-                {editingRecordId === record.id ? (
-                  <div style={styles.contentEditArea}>
-                    <textarea
-                      rows="4"
-                      value={editingContent}
-                      onChange={(event) => setEditingContent(event.target.value)}
-                      style={styles.contentEditTextarea}
-                      aria-label="상담 내용 수정"
-                    />
-                    <div style={styles.contentEditActions}>
-                      <button
-                        type="button"
-                        style={
-                          updatingRecordId === record.id
-                            ? styles.contentSaveButtonDisabled
-                            : styles.contentSaveButton
-                        }
-                        disabled={updatingRecordId === record.id}
-                        onClick={() => handleUpdateContent(record)}
-                      >
-                        {updatingRecordId === record.id ? '저장 중...' : '저장'}
-                      </button>
-                      <button
-                        type="button"
-                        style={styles.contentCancelButton}
-                        disabled={updatingRecordId === record.id}
-                        onClick={handleCancelEdit}
-                      >
-                        취소
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <p className="record-content">{record.content}</p>
-                    {!isHomePreviewVariant ? (
-                      <div style={styles.recordContentActions}>
+                {isRecordExpanded ? (
+                  editingRecordId === record.id ? (
+                    <div style={styles.contentEditArea}>
+                      <textarea
+                        rows="4"
+                        value={editingContent}
+                        onChange={(event) => setEditingContent(event.target.value)}
+                        style={styles.contentEditTextarea}
+                        aria-label="상담 내용 수정"
+                      />
+                      <div style={styles.contentEditActions}>
                         <button
                           type="button"
-                          style={styles.contentEditTriggerButton}
-                          onClick={() => handleStartEdit(record)}
+                          style={
+                            updatingRecordId === record.id
+                              ? styles.contentSaveButtonDisabled
+                              : styles.contentSaveButton
+                          }
+                          disabled={updatingRecordId === record.id}
+                          onClick={() => handleUpdateContent(record)}
                         >
-                          상담 내용 수정
+                          {updatingRecordId === record.id ? '저장 중...' : '저장'}
+                        </button>
+                        <button
+                          type="button"
+                          style={styles.contentCancelButton}
+                          disabled={updatingRecordId === record.id}
+                          onClick={handleCancelEdit}
+                        >
+                          취소
                         </button>
                       </div>
-                    ) : null}
-                  </>
-                )}
+                    </div>
+                  ) : (
+                    <>
+                      <p className="record-content">{record.content}</p>
+                      {!isHomePreviewVariant ? (
+                        <div style={styles.recordContentActions}>
+                          <button
+                            type="button"
+                            style={styles.contentEditTriggerButton}
+                            onClick={() => handleStartEdit(record)}
+                          >
+                            상담 내용 수정
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  )
+                ) : null}
               </li>
-            ))}
+              )
+            })}
           </ul>
         ) : null}
       </section>
@@ -951,6 +1001,28 @@ const styles = {
     flex: '1 1 auto',
     minWidth: '0',
   },
+  recordMetaButton: {
+    display: 'grid',
+    gap: '8px',
+    flex: '1 1 auto',
+    minWidth: '0',
+    padding: '0',
+    border: '0',
+    backgroundColor: 'transparent',
+    textAlign: 'left',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
+  recordMetaButtonHome: {
+    display: 'block',
+    width: '100%',
+    padding: '0',
+    border: '0',
+    backgroundColor: 'transparent',
+    textAlign: 'left',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  },
   recordDateRow: {
     display: 'flex',
     alignItems: 'center',
@@ -1032,9 +1104,11 @@ const styles = {
   },
   toast: {
     position: 'fixed',
-    right: '20px',
-    bottom: '20px',
-    zIndex: '30',
+    top: '20px',
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: '100',
+    width: 'min(420px, calc(100vw - 32px))',
     padding: '14px 16px',
     borderRadius: '18px',
     border: '1px solid rgba(148, 163, 184, 0.18)',

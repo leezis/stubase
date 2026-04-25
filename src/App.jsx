@@ -230,7 +230,7 @@ function getFriendlySupabaseErrorMessage(action, error) {
     rawMessage.includes('relation') &&
     rawMessage.includes('counseling_records')
   ) {
-    return 'counseling_records 테이블이 아직 없습니다. Supabase SQL Editor에서 테이블을 먼저 생성해 주세요.'
+    return '상담 기록 테이블이 아직 없습니다. Supabase SQL Editor에서 먼저 생성해 주세요.'
   }
 
   if (rawMessage.includes('row-level security policy')) {
@@ -323,6 +323,8 @@ function App() {
   const [selectedClass, setSelectedClass] = useState('')
   const [counselingRefreshKey, setCounselingRefreshKey] = useState(0)
   const [counselingCountMap, setCounselingCountMap] = useState({})
+  const [expandedCounselingRecordId, setExpandedCounselingRecordId] =
+    useState(null)
 
   const authUserId = authUser?.id ?? ''
   const selectedStudentId = selectedStudent?.id ?? null
@@ -368,6 +370,7 @@ function App() {
 
     setActiveView('counseling')
     setIsManagementMenuOpen(false)
+    setExpandedCounselingRecordId(null)
 
     if (nextStudent) {
       setSelectedStudent(nextStudent)
@@ -717,11 +720,25 @@ function App() {
   function handleSelectStudent(student, sourceView = activeView) {
     setSelectedStudent(student)
     setCounselingRefreshKey(0)
+    setExpandedCounselingRecordId(null)
     setStatusMessage(
       sourceView === 'counseling'
         ? `${student.name} 학생의 상담 화면을 열었습니다.`
         : `${student.name} 학생을 선택했습니다.`,
     )
+  }
+
+  function handleOpenCounselingRecordFromHome(record) {
+    if (!previewStudent) {
+      return
+    }
+
+    setSelectedStudent(previewStudent)
+    setExpandedCounselingRecordId(record.id)
+    setActiveView('counseling')
+    setIsManagementMenuOpen(false)
+    setIsCounselingShortcutPending(true)
+    setStatusMessage(`${previewStudent.name} 학생의 상담 기록을 열었습니다.`)
   }
 
   function handleCounselingSaveSuccess(studentName) {
@@ -1502,30 +1519,6 @@ function App() {
                     </span>
                   </div>
 
-                  <div
-                    className="student-grid__actions"
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => event.stopPropagation()}
-                  >
-                    <button
-                      className="student-grid__action-button"
-                      type="button"
-                      onClick={() => _handleEditStudent(student)}
-                      disabled={isBusy}
-                    >
-                      수정
-                    </button>
-                    <button
-                      className="student-grid__action-button is-danger"
-                      type="button"
-                      onClick={() => {
-                        void _handleDeleteStudent(student)
-                      }}
-                      disabled={isBusy}
-                    >
-                      삭제
-                    </button>
-                  </div>
                 </li>
               ))}
             </ul>
@@ -1560,6 +1553,7 @@ function App() {
         title="상담 내역"
         showCountBadge={false}
         variant="home-preview"
+        onRecordOpen={handleOpenCounselingRecordFromHome}
         summarySlot={
           previewStudent ? (
             <section
@@ -2012,6 +2006,7 @@ function App() {
                       key={`${selectedStudent.id}-${counselingRefreshKey}`}
                       studentId={selectedStudent.id}
                       studentName={selectedStudent.name}
+                      expandedRecordId={expandedCounselingRecordId}
                       onSaveSuccess={handleCounselingSaveSuccess}
                     />
                   </section>

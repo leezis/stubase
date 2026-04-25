@@ -7,6 +7,9 @@
 alter table if exists public.students enable row level security;
 alter table if exists public.counseling_records enable row level security;
 
+grant select, insert, update, delete on public.students to authenticated;
+grant select, insert, update, delete on public.counseling_records to authenticated;
+
 drop policy if exists "Authenticated users can read students" on public.students;
 drop policy if exists "Authenticated users can insert students" on public.students;
 drop policy if exists "Authenticated users can update students" on public.students;
