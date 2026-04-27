@@ -6,7 +6,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from 'recharts'
-import { getSupabaseEnvHelpMessage, hasSupabaseEnv, supabase } from './lib/supabase'
+import { getSupabaseEnvHelpMessage, hasSupabaseEnv, supabase } from '../../lib/supabase'
 
 const CHART_COLORS = [
   '#8dbbff',

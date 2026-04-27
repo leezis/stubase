@@ -1,5 +1,5 @@
-import dongsuyeongSchoolLogo from './assets/dongsuyeong-school-logo.svg'
-import { getSupabaseEnvHelpMessage } from './lib/supabase'
+import dongsuyeongSchoolLogo from '../../assets/dongsuyeong-school-logo.svg'
+import { getSupabaseEnvHelpMessage } from '../../lib/supabase'
 
 function Login({ errorMessage, isSigningIn, hasSupabaseEnv, onGoogleSignIn }) {
   const isDisabled = !hasSupabaseEnv || isSigningIn

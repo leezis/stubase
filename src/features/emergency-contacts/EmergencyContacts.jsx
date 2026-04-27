@@ -1,10 +1,10 @@
 import { useEffect, useEffectEvent, useMemo, useState } from 'react'
-import schoolLogoUrl from './assets/dongsuyeong-school-logo.svg'
+import schoolLogoUrl from '../../assets/dongsuyeong-school-logo.svg'
 import {
   getSupabaseEnvHelpMessage,
   hasSupabaseEnv,
   supabase,
-} from './lib/supabase'
+} from '../../lib/supabase'
 
 const CONTACT_FETCH_PAGE_SIZE = 1000
 const CONTACT_PAGE_SIZE = 10

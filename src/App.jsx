@@ -1,9 +1,11 @@
 ﻿import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import BatchAvatarUpload from './BatchAvatarUpload.jsx'
-import CounselingForm, { CounselingHistoryPanel } from './CounselingForm.jsx'
-import Dashboard from './Dashboard.jsx'
-import EmergencyContacts from './EmergencyContacts.jsx'
-import Login from './Login.jsx'
+import BatchAvatarUpload from './features/students/BatchAvatarUpload.jsx'
+import CounselingForm, {
+  CounselingHistoryPanel,
+} from './features/counseling/CounselingForm.jsx'
+import Dashboard from './features/dashboard/Dashboard.jsx'
+import EmergencyContacts from './features/emergency-contacts/EmergencyContacts.jsx'
+import Login from './features/auth/Login.jsx'
 import './App.css'
 import {
   getFriendlyAvatarStudentUpdateErrorMessage,

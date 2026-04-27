@@ -2,8 +2,8 @@ import { useRef, useState } from 'react'
 import {
   getFriendlyAvatarStudentUpdateErrorMessage,
   getFriendlyAvatarUploadErrorMessage,
-} from './lib/avatarUploadHelpers'
-import { supabase } from './lib/supabase'
+} from '../../lib/avatarUploadHelpers'
+import { supabase } from '../../lib/supabase'
 
 const BATCH_SIZE = 5
 const STUDENT_MATCH_FETCH_PAGE_SIZE = 1000

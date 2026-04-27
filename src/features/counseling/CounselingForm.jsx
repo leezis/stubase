@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
-import { supabase } from './lib/supabase'
+import { supabase } from '../../lib/supabase'
 
 const CUSTOM_OPTION_VALUE = '__custom__'
 
