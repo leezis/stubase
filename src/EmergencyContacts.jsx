@@ -1,0 +1,1540 @@
+import { useEffect, useEffectEvent, useMemo, useState } from 'react'
+import schoolLogoUrl from './assets/dongsuyeong-school-logo.svg'
+import {
+  getSupabaseEnvHelpMessage,
+  hasSupabaseEnv,
+  supabase,
+} from './lib/supabase'
+
+const CONTACT_FETCH_PAGE_SIZE = 1000
+const CONTACT_PAGE_SIZE = 10
+const EMERGENCY_CONTACT_TITLE = '2026학년도 동수영중학교 비상연락망'
+const SOURCE_WEB_APP_URLS = [
+  'https://script.google.com/macros/s/AKfycbwmI-yNgQUKqXZAIC9asY0zOvIawo79Au97mAbAPjatnp1SmDVs3v7afrF-w-kCipKoPQ/exec'
+]
+const CONTACT_SELECT_COLUMNS =
+  'id, name, grade, class_num, student_num, avatar_url, student_phone, parent_phone'
+const BASIC_SELECT_COLUMNS = 'id, name, grade, class_num, student_num, avatar_url'
+const GRADE_OPTIONS = [1, 2, 3]
+const CLASS_OPTIONS = Array.from({ length: 7 }, (_, index) => index + 1)
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function formatPhoneNumber(value) {
+  const digits = String(value ?? '').replace(/\D/g, '')
+
+  if (!digits) {
+    return ''
+  }
+
+  if (/^\d{11}$/.test(digits)) {
+    return digits.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3')
+  }
+
+  if (/^\d{10}$/.test(digits)) {
+    return digits.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3')
+  }
+
+  return String(value ?? '').trim()
+}
+
+function createSchoolNumber(student) {
+  return `${student.grade}${student.class_num}${String(student.student_num).padStart(2, '0')}`
+}
+
+function normalizeStudent(row) {
+  const grade = Number(row?.grade ?? 0)
+  const classNum = Number(row?.class_num ?? 0)
+  const studentNum = Number(row?.student_num ?? 0)
+
+  return {
+    id: row?.id,
+    name: String(row?.name ?? '').trim(),
+    grade,
+    class_num: classNum,
+    student_num: studentNum,
+    avatar_url: String(row?.avatar_url ?? '').trim(),
+    student_phone: formatPhoneNumber(row?.student_phone ?? ''),
+    parent_phone: formatPhoneNumber(row?.parent_phone ?? ''),
+  }
+}
+
+function getSourceSchoolNumber(row) {
+  const rawNo = String(row?.no ?? '').replace(/\D/g, '')
+
+  if (/^\d{4}$/.test(rawNo)) {
+    return rawNo
+  }
+
+  const grade = String(row?.grade ?? '').replace(/\D/g, '')
+  const classNum = String(row?.cls ?? row?.class_num ?? '').replace(/\D/g, '')
+  const studentNum = String(row?.seat ?? row?.student_num ?? '').replace(/\D/g, '')
+
+  if (!grade || !classNum || !studentNum) {
+    return ''
+  }
+
+  return `${grade}${classNum}${studentNum.padStart(2, '0')}`
+}
+
+function normalizeSourceContactRow(row) {
+  const schoolNumber = getSourceSchoolNumber(row)
+
+  if (!schoolNumber) {
+    return null
+  }
+
+  return {
+    schoolNumber,
+    student_phone: formatPhoneNumber(row?.studentPhone ?? row?.student_phone ?? ''),
+    parent_phone: formatPhoneNumber(row?.parentPhone ?? row?.parent_phone ?? ''),
+  }
+}
+
+function sortStudents(students) {
+  return students.slice().sort((left, right) => {
+    const gradeDiff = Number(left.grade) - Number(right.grade)
+
+    if (gradeDiff !== 0) {
+      return gradeDiff
+    }
+
+    const classDiff = Number(left.class_num) - Number(right.class_num)
+
+    if (classDiff !== 0) {
+      return classDiff
+    }
+
+    return Number(left.student_num) - Number(right.student_num)
+  })
+}
+
+function chunkRows(rows, size) {
+  const chunks = []
+
+  for (let index = 0; index < rows.length; index += size) {
+    chunks.push(rows.slice(index, index + size))
+  }
+
+  return chunks
+}
+
+function hasMissingContactColumnError(error) {
+  const text = [
+    error?.code,
+    error?.message,
+    error?.details,
+    error?.hint,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+
+  return text.includes('student_phone') || text.includes('parent_phone')
+}
+
+function getEmergencyContactErrorMessage(error) {
+  const rawMessage = error?.message ?? ''
+
+  if (hasMissingContactColumnError(error)) {
+    return 'students 테이블에 연락처 컬럼이 아직 없습니다. supabase-add-emergency-contact-columns.sql을 실행해 주세요.'
+  }
+
+  return rawMessage || '비상연락망 데이터를 불러오지 못했습니다.'
+}
+
+async function fetchAllStudents(selectColumns) {
+  const records = []
+  let rangeStart = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('students')
+      .select(selectColumns)
+      .order('grade', { ascending: true })
+      .order('class_num', { ascending: true })
+      .order('student_num', { ascending: true })
+      .range(rangeStart, rangeStart + CONTACT_FETCH_PAGE_SIZE - 1)
+
+    if (error) {
+      return { data: null, error }
+    }
+
+    const nextRows = data ?? []
+    records.push(...nextRows)
+
+    if (nextRows.length < CONTACT_FETCH_PAGE_SIZE) {
+      return { data: records, error: null }
+    }
+
+    rangeStart += CONTACT_FETCH_PAGE_SIZE
+  }
+}
+
+async function fetchEmergencyStudents() {
+  const contactResult = await fetchAllStudents(CONTACT_SELECT_COLUMNS)
+
+  if (!contactResult.error) {
+    return {
+      rows: contactResult.data ?? [],
+      hasContactColumns: true,
+      error: null,
+    }
+  }
+
+  if (!hasMissingContactColumnError(contactResult.error)) {
+    return {
+      rows: [],
+      hasContactColumns: true,
+      error: contactResult.error,
+    }
+  }
+
+  const basicResult = await fetchAllStudents(BASIC_SELECT_COLUMNS)
+
+  return {
+    rows: basicResult.data ?? [],
+    hasContactColumns: false,
+    error: basicResult.error,
+    fallbackError: contactResult.error,
+  }
+}
+
+function getSourceWebAppUrlVariants(baseUrl) {
+  const base = String(baseUrl ?? '').trim()
+
+  if (!base) {
+    return []
+  }
+
+  const urls = [base]
+  const authIndexes = ['0', '1', '2']
+
+  if (base.includes('/macros/s/')) {
+    authIndexes.forEach((authIndex) => {
+      urls.push(base.replace('/macros/s/', `/macros/u/${authIndex}/s/`))
+    })
+  }
+
+  urls.slice().forEach((urlText) => {
+    try {
+      const url = new URL(urlText)
+      authIndexes.forEach((authIndex) => {
+        const nextUrl = new URL(url)
+        nextUrl.searchParams.set('authuser', authIndex)
+        urls.push(nextUrl.toString())
+      })
+    } catch {
+      // Ignore malformed fallback candidates.
+    }
+  })
+
+  return Array.from(new Set(urls))
+}
+
+function callSourceWebAppOnce(baseUrl, method, args = [], timeoutMs = 60000) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `emergencyContactImport${Date.now()}${Math.floor(
+      Math.random() * 100000,
+    )}`
+    const script = document.createElement('script')
+    const timerId = window.setTimeout(() => {
+      cleanup()
+      reject(new Error('원본 연락처 서버 응답 시간이 초과되었습니다.'))
+    }, timeoutMs)
+
+    function cleanup() {
+      window.clearTimeout(timerId)
+      try {
+        delete window[callbackName]
+      } catch {
+        window[callbackName] = undefined
+      }
+
+      if (script.parentNode) {
+        script.parentNode.removeChild(script)
+      }
+    }
+
+    window[callbackName] = (response) => {
+      cleanup()
+
+      if (!response?.ok) {
+        reject(new Error(response?.error || '원본 연락처를 불러오지 못했습니다.'))
+        return
+      }
+
+      resolve(response.data)
+    }
+
+    const url = new URL(baseUrl)
+    url.searchParams.set('method', method)
+    url.searchParams.set('args', JSON.stringify(args))
+    url.searchParams.set('callback', callbackName)
+
+    script.onerror = () => {
+      cleanup()
+      const error = new Error('원본 연락처 서버에 연결하지 못했습니다.')
+      error.requestUrl = url.toString()
+      reject(error)
+    }
+    script.async = true
+    script.src = url.toString()
+    document.head.appendChild(script)
+  })
+}
+
+async function callSourceWebApp(method, args = [], timeoutMs = 60000) {
+  const candidates = SOURCE_WEB_APP_URLS.flatMap(getSourceWebAppUrlVariants)
+  const errors = []
+
+  for (const candidate of candidates) {
+    try {
+      return await callSourceWebAppOnce(candidate, method, args, timeoutMs)
+    } catch (error) {
+      errors.push({
+        url: error?.requestUrl || candidate,
+        message: error?.message || String(error),
+      })
+    }
+  }
+
+  const error = new Error('원본 연락처 서버에 연결하지 못했습니다.')
+  error.attempts = errors
+  throw error
+}
+
+function getPhoneDisplay(value, emptyText) {
+  const formatted = formatPhoneNumber(value)
+
+  return {
+    text: formatted || emptyText,
+    missing: !formatted,
+  }
+}
+
+function createContactCardHtml(student) {
+  const schoolNumber = createSchoolNumber(student)
+  const studentPhone = getPhoneDisplay(student.student_phone, '학생전화 없음')
+  const parentPhone = getPhoneDisplay(student.parent_phone, '학부모전화 없음')
+  const photoHtml = student.avatar_url
+    ? `<img src="${escapeHtml(student.avatar_url)}" alt="${escapeHtml(student.name)} 사진" />`
+    : '<span>사진없음</span>'
+
+  return `<article class="print-emergency-card">
+    <div class="print-emergency-photo">${photoHtml}</div>
+    <div class="print-emergency-body">
+      <div class="print-emergency-meta">${escapeHtml(`${student.grade}학년 ${student.class_num}반 ${student.student_num}번`)}</div>
+      <div class="print-emergency-name">${escapeHtml(student.name || '-')}</div>
+      <div class="print-emergency-phone-list">
+        <div class="print-emergency-phone${studentPhone.missing ? ' is-missing' : ''}">
+          <span>학생</span>
+          <strong>${escapeHtml(studentPhone.text)}</strong>
+        </div>
+        <div class="print-emergency-phone${parentPhone.missing ? ' is-missing' : ''}">
+          <span>학부모</span>
+          <strong>${escapeHtml(parentPhone.text)}</strong>
+        </div>
+      </div>
+      <div class="print-emergency-number">${escapeHtml(schoolNumber)}</div>
+    </div>
+  </article>`
+}
+
+function createContactPagesHtml(rows, grade, classNum) {
+  const pages = chunkRows(rows, CONTACT_PAGE_SIZE)
+
+  return pages
+    .map((pageRows, pageIndex) => {
+      const cardsHtml = pageRows.map(createContactCardHtml).join('')
+
+      return `<section class="print-emergency-page">
+        <header class="print-emergency-head">
+          <div class="print-emergency-title-wrap">
+            <img src="${escapeHtml(schoolLogoUrl)}" alt="" />
+            <div>
+              <p>개인정보보호 유의</p>
+              <h1>${escapeHtml(EMERGENCY_CONTACT_TITLE)}</h1>
+              <span>${escapeHtml(`${grade}학년 ${classNum}반 · 학생 ${rows.length}명`)}</span>
+            </div>
+          </div>
+          <strong>${escapeHtml(`${grade}-${classNum}`)}</strong>
+        </header>
+        <div class="print-emergency-grid">${cardsHtml}</div>
+        <footer>${pageIndex + 1} / ${pages.length}</footer>
+      </section>`
+    })
+    .join('')
+}
+
+function createAllContactPagesHtml(groups) {
+  return groups
+    .map((group) =>
+      createContactPagesHtml(group.rows, group.grade, group.classNum),
+    )
+    .join('')
+}
+
+function openPrintPopup(title, pagesHtml) {
+  const popup = window.open(
+    '',
+    'emergency_contact_print',
+    'width=1280,height=980,resizable=yes,scrollbars=yes',
+  )
+
+  if (!popup) {
+    return false
+  }
+
+  popup.document.open()
+  popup.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        color: #172033;
+        background: #eef2f6;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      body { padding: 18px; }
+      .print-emergency-stack {
+        display: grid;
+        gap: 18px;
+        justify-items: center;
+      }
+      .print-emergency-page {
+        width: 200mm;
+        min-height: 281mm;
+        height: 281mm;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 2.2mm;
+        padding: 5mm;
+        overflow: hidden;
+        background: #ffffff;
+        border: 1px solid #d8e0eb;
+      }
+      .print-emergency-head {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 8mm;
+        padding-bottom: 2.5mm;
+        border-bottom: 1px solid #d8e0eb;
+      }
+      .print-emergency-title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 3mm;
+      }
+      .print-emergency-title-wrap img {
+        width: 14mm;
+        height: 14mm;
+        object-fit: contain;
+      }
+      .print-emergency-title-wrap p,
+      .print-emergency-title-wrap span {
+        margin: 0;
+        color: #65748b;
+        font-size: 10.5px;
+        font-weight: 700;
+      }
+      .print-emergency-title-wrap p {
+        color: #c2410c;
+      }
+      .print-emergency-title-wrap h1 {
+        margin: 1mm 0 0.8mm;
+        color: #172033;
+        font-size: 22px;
+        line-height: 1.15;
+      }
+      .print-emergency-head > strong {
+        display: grid;
+        place-items: center;
+        min-width: 28mm;
+        min-height: 10mm;
+        padding: 0 4mm;
+        border-radius: 999px;
+        background: #eef6ff;
+        color: #225ea8;
+        font-size: 16px;
+      }
+      .print-emergency-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-auto-rows: 46mm;
+        gap: 2mm;
+      }
+      .print-emergency-card {
+        display: grid;
+        grid-template-columns: 27mm minmax(0, 1fr);
+        gap: 2.8mm;
+        align-items: center;
+        min-width: 0;
+        padding: 2mm;
+        border: 1px solid #cfdbe8;
+        border-radius: 4mm;
+        background: #fbfdff;
+        break-inside: avoid;
+      }
+      .print-emergency-photo {
+        width: 27mm;
+        height: 37mm;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        border-radius: 3mm;
+        background: #eef2f6;
+        color: #8391a5;
+        font-size: 11px;
+        font-weight: 800;
+        text-align: center;
+      }
+      .print-emergency-photo img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+      .print-emergency-body {
+        min-width: 0;
+        height: 37mm;
+        display: grid;
+        grid-template-rows: auto 1fr auto auto;
+        gap: 1mm;
+      }
+      .print-emergency-meta {
+        width: fit-content;
+        padding: 1mm 2.2mm;
+        border-radius: 999px;
+        background: #eef6ff;
+        color: #225ea8;
+        font-size: 12px;
+        font-weight: 800;
+      }
+      .print-emergency-name {
+        align-self: center;
+        color: #111827;
+        font-size: 20px;
+        font-weight: 900;
+        line-height: 1.1;
+      }
+      .print-emergency-phone-list {
+        display: grid;
+        gap: 1mm;
+      }
+      .print-emergency-phone {
+        display: grid;
+        grid-template-columns: 13mm minmax(0, 1fr);
+        align-items: center;
+        gap: 1.4mm;
+        min-width: 0;
+        padding: 0.8mm 1mm;
+        border-radius: 2mm;
+        background: #ffffff;
+        border: 1px solid #dbe5ef;
+      }
+      .print-emergency-phone span {
+        display: grid;
+        place-items: center;
+        min-height: 5.6mm;
+        border-radius: 1.6mm;
+        background: #eef2f6;
+        color: #506070;
+        font-size: 10px;
+        font-weight: 800;
+      }
+      .print-emergency-phone strong {
+        min-width: 0;
+        color: #172033;
+        font-size: 16px;
+        line-height: 1.1;
+        white-space: nowrap;
+        text-align: center;
+      }
+      .print-emergency-phone.is-missing strong {
+        color: #9aa4b2;
+        font-size: 12px;
+        white-space: normal;
+      }
+      .print-emergency-number {
+        justify-self: end;
+        color: #94a3b8;
+        font-size: 10px;
+        font-weight: 800;
+      }
+      .print-emergency-page footer {
+        display: flex;
+        justify-content: flex-end;
+        color: #8391a5;
+        font-size: 10px;
+        font-weight: 800;
+      }
+      @media print {
+        @page { size: A4; margin: 5mm; }
+        body {
+          padding: 0;
+          background: #ffffff;
+        }
+        .print-emergency-stack {
+          display: block;
+          gap: 0;
+        }
+        .print-emergency-page {
+          width: 200mm;
+          min-height: 281mm;
+          height: 281mm;
+          margin: 0 auto;
+          border: 0;
+          page-break-after: always;
+          break-after: page;
+        }
+        .print-emergency-page:last-child {
+          page-break-after: auto;
+          break-after: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="print-emergency-stack">${pagesHtml}</main>
+    <script>
+      window.addEventListener('load', function () {
+        var images = Array.prototype.slice.call(document.images || []);
+        var imageReady = Promise.allSettled(images.map(function (image) {
+          if (image.complete) return Promise.resolve();
+          return new Promise(function (resolve) {
+            image.onload = resolve;
+            image.onerror = resolve;
+          });
+        }));
+        Promise.race([
+          imageReady,
+          new Promise(function (resolve) { setTimeout(resolve, 1200); })
+        ]).finally(function () {
+          setTimeout(function () { window.print(); }, 180);
+        });
+      });
+    </script>
+  </body>
+</html>`)
+  popup.document.close()
+  popup.focus()
+  return true
+}
+
+function buildExcelHtml(grade, classNum, rows) {
+  const bodyRows = rows
+    .map((student) => {
+      const studentPhone = formatPhoneNumber(student.student_phone)
+      const parentPhone = formatPhoneNumber(student.parent_phone)
+
+      return `<tr>
+        <td style="mso-number-format:'\\@';">${escapeHtml(createSchoolNumber(student))}</td>
+        <td>${escapeHtml(student.name)}</td>
+        <td>${escapeHtml(student.grade)}</td>
+        <td>${escapeHtml(student.class_num)}</td>
+        <td>${escapeHtml(student.student_num)}</td>
+        <td style="mso-number-format:'\\@';">${escapeHtml(studentPhone)}</td>
+        <td style="mso-number-format:'\\@';">${escapeHtml(parentPhone)}</td>
+      </tr>`
+    })
+    .join('')
+
+  return `\ufeff<html xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:x="urn:schemas-microsoft-com:office:excel"
+xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Type" content="application/vnd.ms-excel; charset=UTF-8" />
+  <style>
+    @page { size: A4 landscape; margin: 6mm; }
+    body {
+      font-family: "Malgun Gothic", "Pretendard", sans-serif;
+      color: #172033;
+    }
+    h1 {
+      margin: 0 0 4px;
+      text-align: center;
+      font-size: 24pt;
+    }
+    p {
+      margin: 0 0 8px;
+      text-align: center;
+      color: #506070;
+      font-size: 13pt;
+      font-weight: 700;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    th,
+    td {
+      border: 1px solid #b7c8df;
+      padding: 8px 10px;
+      text-align: center;
+      vertical-align: middle;
+      font-size: 13pt;
+    }
+    th {
+      background: #dbeafe;
+      color: #1e3a8a;
+      font-weight: 800;
+    }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(EMERGENCY_CONTACT_TITLE)}</h1>
+  <p>${escapeHtml(`${grade}학년 ${classNum}반 · 학생 수 ${rows.length}명`)}</p>
+  <table>
+    <thead>
+      <tr>
+        <th>학번</th>
+        <th>이름</th>
+        <th>학년</th>
+        <th>반</th>
+        <th>번호</th>
+        <th>학생 전화번호</th>
+        <th>학부모 전화번호</th>
+      </tr>
+    </thead>
+    <tbody>${bodyRows}</tbody>
+  </table>
+</body>
+</html>`
+}
+
+function downloadExcelFile(fileName, html) {
+  const blob = new Blob([html], {
+    type: 'application/vnd.ms-excel;charset=utf-8;',
+  })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = fileName
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url)
+  }, 1200)
+}
+
+function EmergencyStudentCard({ isSelected, onSelect, student }) {
+  const studentPhone = getPhoneDisplay(student.student_phone, '학생전화 없음')
+  const parentPhone = getPhoneDisplay(student.parent_phone, '학부모전화 없음')
+
+  return (
+    <button
+      className={`emergency-contact-card ${isSelected ? 'is-selected' : ''}`}
+      type="button"
+      onClick={() => onSelect(student)}
+    >
+      <span className="emergency-contact-card__photo" aria-hidden="true">
+        {student.avatar_url ? <img src={student.avatar_url} alt="" /> : '사진없음'}
+      </span>
+
+      <span className="emergency-contact-card__body">
+        <span className="emergency-contact-card__meta">
+          {student.grade}학년 {student.class_num}반 {student.student_num}번
+        </span>
+        <strong>{student.name || '-'}</strong>
+        <span className="emergency-contact-card__phones">
+          <span className={studentPhone.missing ? 'is-missing' : ''}>
+            학생 <b>{studentPhone.text}</b>
+          </span>
+          <span className={parentPhone.missing ? 'is-missing' : ''}>
+            학부모 <b>{parentPhone.text}</b>
+          </span>
+        </span>
+      </span>
+    </button>
+  )
+}
+
+function EmergencyContacts() {
+  const [students, setStudents] = useState([])
+  const [selectedGrade, setSelectedGrade] = useState('1')
+  const [selectedClass, setSelectedClass] = useState('1')
+  const [selectedStudentId, setSelectedStudentId] = useState('')
+  const [lookupQuery, setLookupQuery] = useState('')
+  const [lookupCandidates, setLookupCandidates] = useState([])
+  const [phoneDrafts, setPhoneDrafts] = useState({
+    student_phone: '',
+    parent_phone: '',
+  })
+  const [hasContactColumns, setHasContactColumns] = useState(true)
+  const [isLoading, setIsLoading] = useState(hasSupabaseEnv)
+  const [isImportingContacts, setIsImportingContacts] = useState(false)
+  const [savingField, setSavingField] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
+
+  const selectedClassStudents = useMemo(
+    () =>
+      sortStudents(
+        students.filter(
+          (student) =>
+            String(student.grade) === selectedGrade &&
+            String(student.class_num) === selectedClass,
+        ),
+      ),
+    [selectedClass, selectedGrade, students],
+  )
+  const selectedStudent = useMemo(
+    () =>
+      students.find((student) => String(student.id) === selectedStudentId) ??
+      null,
+    [selectedStudentId, students],
+  )
+  const pages = useMemo(
+    () => chunkRows(selectedClassStudents, CONTACT_PAGE_SIZE),
+    [selectedClassStudents],
+  )
+  const missingContactCount = selectedClassStudents.filter(
+    (student) => !student.student_phone || !student.parent_phone,
+  ).length
+  const classGroups = useMemo(() => {
+    const grouped = new Map()
+
+    students.forEach((student) => {
+      const key = `${student.grade}-${student.class_num}`
+      const current = grouped.get(key) ?? {
+        grade: student.grade,
+        classNum: student.class_num,
+        rows: [],
+      }
+      current.rows.push(student)
+      grouped.set(key, current)
+    })
+
+    return Array.from(grouped.values())
+      .map((group) => ({
+        ...group,
+        rows: sortStudents(group.rows),
+      }))
+      .sort((left, right) => {
+        const gradeDiff = Number(left.grade) - Number(right.grade)
+
+        if (gradeDiff !== 0) {
+          return gradeDiff
+        }
+
+        return Number(left.classNum) - Number(right.classNum)
+      })
+  }, [students])
+
+  async function loadEmergencyContacts({ silent = false } = {}) {
+    if (!supabase) {
+      return
+    }
+
+    setIsLoading(true)
+    setErrorMessage('')
+
+    if (!silent) {
+      setStatusMessage('비상연락망 학생 정보를 불러오는 중입니다.')
+    }
+
+    const result = await fetchEmergencyStudents()
+
+    if (result.error) {
+      setStudents([])
+      setErrorMessage(getEmergencyContactErrorMessage(result.error))
+      setStatusMessage('비상연락망을 불러오지 못했습니다.')
+      setIsLoading(false)
+      return
+    }
+
+    const nextStudents = sortStudents((result.rows ?? []).map(normalizeStudent))
+    setStudents(nextStudents)
+    setHasContactColumns(result.hasContactColumns)
+    setStatusMessage(
+      result.hasContactColumns
+        ? `비상연락망 학생 ${nextStudents.length}명을 불러왔습니다.`
+        : '연락처 컬럼이 없어 보기 전용으로 불러왔습니다.',
+    )
+    setErrorMessage(
+      result.hasContactColumns
+        ? ''
+        : getEmergencyContactErrorMessage(result.fallbackError),
+    )
+    setIsLoading(false)
+  }
+
+  const runInitialLoad = useEffectEvent(() => {
+    void loadEmergencyContacts({ silent: false })
+  })
+
+  useEffect(() => {
+    if (!hasSupabaseEnv) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      runInitialLoad()
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [])
+
+  function clearSelectedEmergencyStudent() {
+    setSelectedStudentId('')
+    setPhoneDrafts({
+      student_phone: '',
+      parent_phone: '',
+    })
+  }
+
+  function handleSelectStudent(student) {
+    setSelectedGrade(String(student.grade))
+    setSelectedClass(String(student.class_num))
+    setSelectedStudentId(String(student.id))
+    setLookupCandidates([])
+    setPhoneDrafts({
+      student_phone: formatPhoneNumber(student.student_phone),
+      parent_phone: formatPhoneNumber(student.parent_phone),
+    })
+    setStatusMessage(
+      `${student.grade}학년 ${student.class_num}반 ${student.student_num}번 ${student.name} 학생을 선택했습니다.`,
+    )
+  }
+
+  function handleFindStudent() {
+    const query = lookupQuery.trim()
+    setLookupCandidates([])
+
+    if (!query) {
+      setStatusMessage('학번 또는 이름을 입력해 주세요.')
+      return
+    }
+
+    if (/^\d+$/.test(query) && query.length !== 4) {
+      setStatusMessage('학번은 4자리로 입력해 주세요.')
+      return
+    }
+
+    const isSchoolNumberQuery = /^\d{4}$/.test(query)
+    const source = isSchoolNumberQuery
+      ? students
+      : selectedClassStudents.length
+        ? selectedClassStudents
+        : students
+    const candidates = isSchoolNumberQuery
+      ? source.filter((student) => createSchoolNumber(student) === query)
+      : source.filter((student) => student.name.includes(query))
+
+    if (candidates.length === 0) {
+      clearSelectedEmergencyStudent()
+      setStatusMessage('일치하는 학생을 찾지 못했습니다.')
+      return
+    }
+
+    if (candidates.length === 1) {
+      handleSelectStudent(candidates[0])
+      return
+    }
+
+    clearSelectedEmergencyStudent()
+    setLookupCandidates(candidates)
+    setStatusMessage(`동명이인 ${candidates.length}명이 검색되었습니다.`)
+  }
+
+  function handlePhoneDraftChange(fieldName, value) {
+    setPhoneDrafts((previous) => ({
+      ...previous,
+      [fieldName]: value,
+    }))
+  }
+
+  function handlePhoneDraftBlur(fieldName) {
+    setPhoneDrafts((previous) => ({
+      ...previous,
+      [fieldName]: formatPhoneNumber(previous[fieldName]),
+    }))
+  }
+
+  async function handleSavePhone(fieldName) {
+    if (!selectedStudent || !supabase) {
+      setStatusMessage('먼저 학생을 선택해 주세요.')
+      return
+    }
+
+    if (!hasContactColumns) {
+      setStatusMessage(
+        '연락처 저장을 하려면 Supabase students 테이블에 연락처 컬럼을 먼저 추가해야 합니다.',
+      )
+      return
+    }
+
+    const nextValue = formatPhoneNumber(phoneDrafts[fieldName])
+    const payload = {
+      [fieldName]: nextValue,
+    }
+
+    setSavingField(fieldName)
+    setErrorMessage('')
+    setStatusMessage('연락처를 저장하는 중입니다.')
+
+    const { data, error } = await supabase
+      .from('students')
+      .update(payload)
+      .eq('id', selectedStudent.id)
+      .select('id, student_phone, parent_phone')
+      .single()
+
+    if (error) {
+      if (hasMissingContactColumnError(error)) {
+        setHasContactColumns(false)
+      }
+
+      setErrorMessage(getEmergencyContactErrorMessage(error))
+      setStatusMessage('연락처 저장에 실패했습니다.')
+      setSavingField('')
+      return
+    }
+
+    setStudents((previous) =>
+      previous.map((student) =>
+        student.id === selectedStudent.id
+          ? {
+              ...student,
+              student_phone: formatPhoneNumber(data?.student_phone ?? student.student_phone),
+              parent_phone: formatPhoneNumber(data?.parent_phone ?? student.parent_phone),
+            }
+          : student,
+      ),
+    )
+    setPhoneDrafts((previous) => ({
+      ...previous,
+      [fieldName]: nextValue,
+    }))
+    setStatusMessage('연락처를 저장했습니다.')
+    setSavingField('')
+  }
+
+  async function handleImportSourceContacts() {
+    if (!supabase) {
+      return
+    }
+
+    if (!hasContactColumns) {
+      setStatusMessage(
+        '연락처 가져오기를 하려면 Supabase students 테이블에 연락처 컬럼을 먼저 추가해야 합니다.',
+      )
+      return
+    }
+
+    if (!students.length) {
+      setStatusMessage('먼저 학생명단을 불러온 뒤 다시 시도해 주세요.')
+      return
+    }
+
+    setIsImportingContacts(true)
+    setErrorMessage('')
+    setStatusMessage('원본 결석계 사이트에서 연락처를 가져오는 중입니다.')
+
+    try {
+      const sourceRows = await callSourceWebApp('getStudentsFresh', [])
+      const sourceContactMap = new Map()
+
+      ;(Array.isArray(sourceRows) ? sourceRows : [])
+        .map(normalizeSourceContactRow)
+        .filter(Boolean)
+        .forEach((row) => {
+          sourceContactMap.set(row.schoolNumber, row)
+        })
+
+      const updates = students
+        .map((student) => {
+          const source = sourceContactMap.get(createSchoolNumber(student))
+
+          if (!source) {
+            return null
+          }
+
+          const payload = {}
+
+          if (
+            source.student_phone &&
+            source.student_phone !== formatPhoneNumber(student.student_phone)
+          ) {
+            payload.student_phone = source.student_phone
+          }
+
+          if (
+            source.parent_phone &&
+            source.parent_phone !== formatPhoneNumber(student.parent_phone)
+          ) {
+            payload.parent_phone = source.parent_phone
+          }
+
+          if (!Object.keys(payload).length) {
+            return null
+          }
+
+          return {
+            id: student.id,
+            payload,
+          }
+        })
+        .filter(Boolean)
+
+      if (!updates.length) {
+        setStatusMessage('가져올 새 연락처가 없습니다.')
+        setIsImportingContacts(false)
+        return
+      }
+
+      const updatedContactMap = new Map()
+      const batchSize = 12
+
+      for (let index = 0; index < updates.length; index += batchSize) {
+        const batch = updates.slice(index, index + batchSize)
+        const results = await Promise.all(
+          batch.map((item) =>
+            supabase
+              .from('students')
+              .update(item.payload)
+              .eq('id', item.id)
+              .select('id, student_phone, parent_phone')
+              .single(),
+          ),
+        )
+
+        const failed = results.find((result) => result.error)
+
+        if (failed?.error) {
+          if (hasMissingContactColumnError(failed.error)) {
+            setHasContactColumns(false)
+          }
+
+          throw failed.error
+        }
+
+        results.forEach((result) => {
+          if (!result.data?.id) {
+            return
+          }
+
+          updatedContactMap.set(result.data.id, {
+            student_phone: formatPhoneNumber(result.data.student_phone),
+            parent_phone: formatPhoneNumber(result.data.parent_phone),
+          })
+        })
+
+        setStatusMessage(
+          `원본 연락처를 저장하는 중입니다. (${Math.min(
+            index + batch.length,
+            updates.length,
+          )}/${updates.length})`,
+        )
+      }
+
+      setStudents((previous) =>
+        previous.map((student) => {
+          const updated = updatedContactMap.get(student.id)
+
+          return updated ? { ...student, ...updated } : student
+        }),
+      )
+
+      if (selectedStudentId && updatedContactMap.has(selectedStudentId)) {
+        const updated = updatedContactMap.get(selectedStudentId)
+        setPhoneDrafts({
+          student_phone: updated.student_phone,
+          parent_phone: updated.parent_phone,
+        })
+      }
+
+      setStatusMessage(`원본 연락처 ${updatedContactMap.size}명을 반영했습니다.`)
+    } catch (error) {
+      setErrorMessage(getEmergencyContactErrorMessage(error))
+      setStatusMessage('원본 연락처 가져오기에 실패했습니다.')
+    } finally {
+      setIsImportingContacts(false)
+    }
+  }
+
+  function handlePrintSelectedClass() {
+    if (!selectedClassStudents.length) {
+      setStatusMessage('출력할 학생이 없습니다.')
+      return
+    }
+
+    const pagesHtml = createContactPagesHtml(
+      selectedClassStudents,
+      selectedGrade,
+      selectedClass,
+    )
+    const opened = openPrintPopup(
+      `${EMERGENCY_CONTACT_TITLE}_${selectedGrade}학년${selectedClass}반`,
+      pagesHtml,
+    )
+
+    if (!opened) {
+      setStatusMessage('팝업 차단을 해제한 뒤 다시 출력해 주세요.')
+    }
+  }
+
+  function handlePrintAllClasses() {
+    if (!classGroups.length) {
+      setStatusMessage('출력할 학생이 없습니다.')
+      return
+    }
+
+    const opened = openPrintPopup(
+      `${EMERGENCY_CONTACT_TITLE}_전체`,
+      createAllContactPagesHtml(classGroups),
+    )
+
+    if (!opened) {
+      setStatusMessage('팝업 차단을 해제한 뒤 다시 출력해 주세요.')
+    }
+  }
+
+  function handleExportExcel() {
+    if (!selectedClassStudents.length) {
+      setStatusMessage('저장할 학생이 없습니다.')
+      return
+    }
+
+    const html = buildExcelHtml(
+      selectedGrade,
+      selectedClass,
+      selectedClassStudents,
+    )
+    downloadExcelFile(
+      `${EMERGENCY_CONTACT_TITLE}_${selectedGrade}학년${selectedClass}반.xls`,
+      html,
+    )
+    setStatusMessage('엑셀 파일을 저장했습니다.')
+  }
+
+  if (!hasSupabaseEnv) {
+    return (
+      <section className="empty-card">
+        <div className="empty-icon">!</div>
+        <h2>비상연락망을 열려면 Supabase 연결이 필요합니다.</h2>
+        <p>{getSupabaseEnvHelpMessage()}</p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="emergency-contacts-shell">
+      <section className="emergency-contacts-toolbar">
+        <div>
+          <p className="section-label">학교업무</p>
+          <h1>비상연락망</h1>
+          <p className="emergency-contacts-toolbar__copy">
+            학급별 학생 연락처를 확인하고 출력합니다.
+          </p>
+        </div>
+
+        <div className="emergency-contacts-actions">
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => void loadEmergencyContacts({ silent: false })}
+            disabled={isLoading || isImportingContacts}
+          >
+            {isLoading ? '새로고침 중...' : '학생명단 새로고침'}
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => void handleImportSourceContacts()}
+            disabled={isLoading || isImportingContacts || !students.length}
+          >
+            {isImportingContacts ? '가져오는 중...' : '원본 연락처 가져오기'}
+          </button>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={handleExportExcel}
+            disabled={!selectedClassStudents.length}
+          >
+            엑셀 저장
+          </button>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={handlePrintAllClasses}
+            disabled={!classGroups.length}
+          >
+            전체 출력
+          </button>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={handlePrintSelectedClass}
+            disabled={!selectedClassStudents.length}
+          >
+            PDF 출력
+          </button>
+        </div>
+      </section>
+
+      <section className="emergency-contacts-layout">
+        <section className="emergency-contacts-preview">
+          <div className="emergency-contacts-paper-head">
+            <div>
+              <span>개인정보보호 유의</span>
+              <h2>{EMERGENCY_CONTACT_TITLE}</h2>
+              <p>
+                {selectedGrade}학년 {selectedClass}반 · 학생{' '}
+                {selectedClassStudents.length}명
+              </p>
+            </div>
+
+            <strong>
+              {selectedGrade}-{selectedClass}
+            </strong>
+          </div>
+
+          <div className="emergency-contact-pages">
+            {pages.length ? (
+              pages.map((pageRows, pageIndex) => (
+                <section
+                  className="emergency-contact-page"
+                  key={`${selectedGrade}-${selectedClass}-${pageIndex}`}
+                >
+                  <div className="emergency-contact-card-grid">
+                    {pageRows.map((student) => (
+                      <EmergencyStudentCard
+                        key={student.id}
+                        student={student}
+                        isSelected={selectedStudentId === String(student.id)}
+                        onSelect={handleSelectStudent}
+                      />
+                    ))}
+                  </div>
+                  <footer>
+                    {pageIndex + 1} / {pages.length}
+                  </footer>
+                </section>
+              ))
+            ) : (
+              <section className="emergency-contact-empty">
+                <strong>
+                  {isLoading
+                    ? '비상연락망을 불러오는 중입니다.'
+                    : '선택한 학급에 표시할 학생이 없습니다.'}
+                </strong>
+                <p>
+                  {isLoading
+                    ? '학생 정보와 연락처를 확인하고 있습니다.'
+                    : '학년과 반을 다시 선택하거나 학생명단을 새로고침해 주세요.'}
+                </p>
+              </section>
+            )}
+          </div>
+        </section>
+
+        <aside className="emergency-contacts-panel">
+          <section className="emergency-contacts-card">
+            <h2>출력 학급</h2>
+            <div className="emergency-contacts-class-grid">
+              <label className="field">
+                <span className="field-label">학년</span>
+                <select
+                  className="field-input field-select"
+                  value={selectedGrade}
+                  onChange={(event) => {
+                    setSelectedGrade(event.target.value)
+                    clearSelectedEmergencyStudent()
+                    setLookupCandidates([])
+                  }}
+                >
+                  {GRADE_OPTIONS.map((grade) => (
+                    <option key={grade} value={grade}>
+                      {grade}학년
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span className="field-label">반</span>
+                <select
+                  className="field-input field-select"
+                  value={selectedClass}
+                  onChange={(event) => {
+                    setSelectedClass(event.target.value)
+                    clearSelectedEmergencyStudent()
+                    setLookupCandidates([])
+                  }}
+                >
+                  {CLASS_OPTIONS.map((classNum) => (
+                    <option key={classNum} value={classNum}>
+                      {classNum}반
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="emergency-contacts-stat-grid">
+              <article>
+                <span>학생 수</span>
+                <strong>{selectedClassStudents.length}</strong>
+              </article>
+              <article>
+                <span>출력 페이지</span>
+                <strong>{pages.length}</strong>
+              </article>
+              <article>
+                <span>연락처 확인</span>
+                <strong>{missingContactCount}</strong>
+              </article>
+            </div>
+          </section>
+
+          <section className="emergency-contacts-card">
+            <h2>연락처 수정</h2>
+            <div className="emergency-contacts-search">
+              <input
+                className="field-input"
+                type="text"
+                value={lookupQuery}
+                onChange={(event) => setLookupQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault()
+                    handleFindStudent()
+                  }
+                }}
+                placeholder="4자리 학번 또는 이름"
+              />
+              <button
+                className="primary-button"
+                type="button"
+                onClick={handleFindStudent}
+              >
+                확인
+              </button>
+            </div>
+
+            {lookupCandidates.length ? (
+              <div className="emergency-contacts-candidates">
+                {lookupCandidates.map((student) => (
+                  <button
+                    key={student.id}
+                    type="button"
+                    onClick={() => handleSelectStudent(student)}
+                  >
+                    <strong>
+                      {createSchoolNumber(student)} {student.name}
+                    </strong>
+                    <span>
+                      {student.grade}학년 {student.class_num}반{' '}
+                      {student.student_num}번
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="emergency-contacts-selected">
+              <span>선택 학생</span>
+              <strong>
+                {selectedStudent
+                  ? `${createSchoolNumber(selectedStudent)} ${selectedStudent.name}`
+                  : '-'}
+              </strong>
+            </div>
+
+            <div className="emergency-contacts-phone-fields">
+              <label className="field">
+                <span className="field-label">학생 전화번호</span>
+                <div className="emergency-contacts-phone-row">
+                  <input
+                    className="field-input"
+                    type="text"
+                    value={phoneDrafts.student_phone}
+                    onChange={(event) =>
+                      handlePhoneDraftChange('student_phone', event.target.value)
+                    }
+                    onBlur={() => handlePhoneDraftBlur('student_phone')}
+                    placeholder="010-1234-5678"
+                    disabled={!selectedStudent || !hasContactColumns}
+                  />
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void handleSavePhone('student_phone')}
+                    disabled={
+                      !selectedStudent ||
+                      !hasContactColumns ||
+                      savingField === 'student_phone'
+                    }
+                  >
+                    {savingField === 'student_phone' ? '저장중...' : '저장'}
+                  </button>
+                </div>
+              </label>
+
+              <label className="field">
+                <span className="field-label">학부모 전화번호</span>
+                <div className="emergency-contacts-phone-row">
+                  <input
+                    className="field-input"
+                    type="text"
+                    value={phoneDrafts.parent_phone}
+                    onChange={(event) =>
+                      handlePhoneDraftChange('parent_phone', event.target.value)
+                    }
+                    onBlur={() => handlePhoneDraftBlur('parent_phone')}
+                    placeholder="010-1234-5678"
+                    disabled={!selectedStudent || !hasContactColumns}
+                  />
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={() => void handleSavePhone('parent_phone')}
+                    disabled={
+                      !selectedStudent ||
+                      !hasContactColumns ||
+                      savingField === 'parent_phone'
+                    }
+                  >
+                    {savingField === 'parent_phone' ? '저장중...' : '저장'}
+                  </button>
+                </div>
+              </label>
+            </div>
+
+            <p
+              className={`emergency-contacts-status ${
+                errorMessage ? 'is-error' : ''
+              }`}
+              aria-live="polite"
+            >
+              {errorMessage || statusMessage || '학생을 선택하면 연락처를 수정할 수 있습니다.'}
+            </p>
+          </section>
+        </aside>
+      </section>
+    </section>
+  )
+}
+
+export default EmergencyContacts

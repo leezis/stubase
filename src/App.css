@@ -215,6 +215,14 @@
   gap: 12px;
 }
 
+.app-header__mega-menu--compact {
+  width: min(380px, calc(100vw - 80px));
+}
+
+.app-header__mega-menu-grid--single {
+  grid-template-columns: 1fr;
+}
+
 .app-header__mega-item {
   display: grid;
   grid-template-columns: 46px minmax(0, 1fr);
@@ -1966,6 +1974,388 @@
   box-shadow: none;
 }
 
+.emergency-contacts-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.emergency-contacts-toolbar,
+.emergency-contacts-preview,
+.emergency-contacts-card {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.emergency-contacts-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px;
+  border-radius: 24px;
+}
+
+.emergency-contacts-toolbar h1 {
+  font-size: clamp(1.45rem, 2.4vw, 2rem);
+}
+
+.emergency-contacts-toolbar__copy {
+  margin-top: 6px;
+  font-size: 14px;
+}
+
+.emergency-contacts-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.emergency-contacts-actions .ghost-button,
+.emergency-contacts-actions .primary-button,
+.emergency-contacts-actions .secondary-button {
+  min-height: 42px;
+  padding-inline: 14px;
+  border-radius: 14px;
+  font-size: 14px;
+}
+
+.emergency-contacts-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(340px, 0.78fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.emergency-contacts-preview {
+  min-width: 0;
+  padding: 22px;
+  border-radius: 24px;
+}
+
+.emergency-contacts-paper-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(229, 233, 240, 0.98);
+}
+
+.emergency-contacts-paper-head span {
+  color: #c2410c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.emergency-contacts-paper-head h2 {
+  margin-top: 4px;
+  font-size: clamp(1.18rem, 2vw, 1.55rem);
+}
+
+.emergency-contacts-paper-head p {
+  margin-top: 4px;
+  font-size: 14px;
+}
+
+.emergency-contacts-paper-head > strong {
+  display: grid;
+  place-items: center;
+  min-width: 74px;
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: #eef6ff;
+  color: #225ea8;
+  font-size: 18px;
+}
+
+.emergency-contact-pages {
+  display: grid;
+  gap: 16px;
+}
+
+.emergency-contact-page {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(211, 222, 235, 0.96);
+  background: #fbfdff;
+}
+
+.emergency-contact-page footer {
+  display: flex;
+  justify-content: flex-end;
+  color: #8b95a1;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.emergency-contact-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.emergency-contact-card {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  min-height: 142px;
+  padding: 12px;
+  border: 1px solid rgba(211, 222, 235, 0.95);
+  border-radius: 16px;
+  background: #ffffff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
+}
+
+.emergency-contact-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(49, 130, 246, 0.28);
+  box-shadow: 0 14px 24px rgba(49, 130, 246, 0.08);
+}
+
+.emergency-contact-card.is-selected {
+  border-color: rgba(49, 130, 246, 0.56);
+  box-shadow: 0 0 0 4px rgba(49, 130, 246, 0.1);
+}
+
+.emergency-contact-card__photo {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #eef2f6;
+  color: #8391a5;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.emergency-contact-card__photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.emergency-contact-card__body {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.emergency-contact-card__meta {
+  width: fit-content;
+  max-width: 100%;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #eef6ff;
+  color: #225ea8;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: normal;
+}
+
+.emergency-contact-card__body strong {
+  color: var(--ink);
+  font-size: clamp(1.05rem, 1.8vw, 1.28rem);
+  line-height: 1.2;
+}
+
+.emergency-contact-card__phones {
+  display: grid;
+  gap: 6px;
+}
+
+.emergency-contact-card__phones > span {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #596579;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.emergency-contact-card__phones b {
+  min-width: 0;
+  color: #172033;
+  font-size: 14px;
+  font-weight: 900;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.emergency-contact-card__phones .is-missing b {
+  color: #9aa4b2;
+  font-size: 12px;
+  white-space: normal;
+}
+
+.emergency-contact-empty {
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+  gap: 8px;
+  padding: 24px;
+  border: 1px dashed rgba(148, 163, 184, 0.38);
+  border-radius: 18px;
+  text-align: center;
+  background: #fbfdff;
+}
+
+.emergency-contact-empty strong {
+  color: var(--ink);
+  font-size: 18px;
+}
+
+.emergency-contacts-panel {
+  position: sticky;
+  top: var(--sticky-panel-top);
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.emergency-contacts-card {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 24px;
+}
+
+.emergency-contacts-card h2 {
+  font-size: 1.15rem;
+}
+
+.emergency-contacts-class-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.emergency-contacts-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.emergency-contacts-stat-grid article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(229, 233, 240, 0.92);
+  background: #f8fafc;
+}
+
+.emergency-contacts-stat-grid span {
+  color: #6b7684;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.emergency-contacts-stat-grid strong {
+  color: var(--ink);
+  font-size: 22px;
+  line-height: 1.15;
+}
+
+.emergency-contacts-search,
+.emergency-contacts-phone-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.emergency-contacts-search .primary-button,
+.emergency-contacts-phone-row .secondary-button {
+  min-height: 52px;
+  white-space: nowrap;
+}
+
+.emergency-contacts-candidates {
+  display: grid;
+  gap: 8px;
+}
+
+.emergency-contacts-candidates button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid rgba(229, 233, 240, 0.95);
+  border-radius: 14px;
+  background: #ffffff;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.emergency-contacts-candidates strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.emergency-contacts-candidates span {
+  color: #6b7684;
+  font-size: 13px;
+}
+
+.emergency-contacts-selected {
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(16, 185, 129, 0.16);
+  background: #f0fdfa;
+}
+
+.emergency-contacts-selected span {
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.emergency-contacts-selected strong {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.emergency-contacts-phone-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.emergency-contacts-status {
+  min-height: 22px;
+  color: #596579;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.emergency-contacts-status.is-error {
+  color: var(--danger);
+}
+
 .record-list {
   list-style: none;
   margin: 0;
@@ -2998,5 +3388,89 @@
   .app-header__nav-button {
     min-height: 34px;
     font-size: 14px;
+  }
+}
+
+@media (max-width: 1080px) {
+  .emergency-contacts-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .emergency-contacts-panel {
+    position: static;
+  }
+}
+
+@media (max-width: 760px) {
+  .emergency-contacts-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 18px;
+  }
+
+  .emergency-contacts-actions {
+    justify-content: stretch;
+  }
+
+  .emergency-contacts-actions .ghost-button,
+  .emergency-contacts-actions .primary-button,
+  .emergency-contacts-actions .secondary-button {
+    flex: 1 1 calc(50% - 6px);
+  }
+
+  .emergency-contacts-preview,
+  .emergency-contacts-card {
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .emergency-contacts-paper-head {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .emergency-contact-card-grid,
+  .emergency-contacts-class-grid,
+  .emergency-contacts-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .emergency-contact-card {
+    grid-template-columns: 70px minmax(0, 1fr);
+    min-height: 132px;
+  }
+
+  .emergency-contact-card__photo {
+    width: 70px;
+  }
+}
+
+@media (max-width: 520px) {
+  .emergency-contacts-actions .ghost-button,
+  .emergency-contacts-actions .primary-button,
+  .emergency-contacts-actions .secondary-button,
+  .emergency-contacts-search,
+  .emergency-contacts-phone-row {
+    width: 100%;
+  }
+
+  .emergency-contacts-search,
+  .emergency-contacts-phone-row {
+    grid-template-columns: 1fr;
+  }
+
+  .emergency-contact-card {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .emergency-contact-card__body,
+  .emergency-contact-card__phones {
+    width: 100%;
+  }
+
+  .emergency-contact-card__meta {
+    justify-self: center;
   }
 }

@@ -2,6 +2,7 @@
 import BatchAvatarUpload from './BatchAvatarUpload.jsx'
 import CounselingForm, { CounselingHistoryPanel } from './CounselingForm.jsx'
 import Dashboard from './Dashboard.jsx'
+import EmergencyContacts from './EmergencyContacts.jsx'
 import Login from './Login.jsx'
 import './App.css'
 import {
@@ -340,6 +341,7 @@ function App() {
   const studentGridScrollRef = useRef(null)
   const detailColumnRef = useRef(null)
   const managementMenuCloseTimeoutRef = useRef(null)
+  const schoolWorkMenuCloseTimeoutRef = useRef(null)
   const pageRef = useRef(null)
   const appHeaderRef = useRef(null)
   const studentDiscoveryRef = useRef(null)
@@ -348,6 +350,7 @@ function App() {
   const [isCounselingShortcutPending, setIsCounselingShortcutPending] =
     useState(false)
   const [isManagementMenuOpen, setIsManagementMenuOpen] = useState(false)
+  const [isSchoolWorkMenuOpen, setIsSchoolWorkMenuOpen] = useState(false)
 
   function resetStudentForm() {
     setFormValues(initialStudentFormValues)
@@ -363,6 +366,7 @@ function App() {
     setActiveView('home')
     setIsCounselingShortcutPending(false)
     setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
   }
 
   function handleOpenCounselingView() {
@@ -370,6 +374,7 @@ function App() {
 
     setActiveView('counseling')
     setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
     setExpandedCounselingRecordId(null)
 
     if (nextStudent) {
@@ -385,18 +390,28 @@ function App() {
     setActiveView('dashboard')
     setIsCounselingShortcutPending(false)
     setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
   }
 
   function handleOpenStudentFormView() {
     setActiveView('student-create')
     setIsCounselingShortcutPending(false)
     setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
   }
 
   function handleOpenBatchUploadView() {
     setActiveView('photo-matching')
     setIsCounselingShortcutPending(false)
     setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
+  }
+
+  function handleOpenEmergencyContactsView() {
+    setActiveView('emergency-contacts')
+    setIsCounselingShortcutPending(false)
+    setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
   }
 
   function clearManagementMenuCloseTimeout() {
@@ -408,12 +423,47 @@ function App() {
 
   function openManagementMenu() {
     clearManagementMenuCloseTimeout()
+    setIsSchoolWorkMenuOpen(false)
     setIsManagementMenuOpen(true)
   }
 
   function closeManagementMenu() {
     clearManagementMenuCloseTimeout()
     setIsManagementMenuOpen(false)
+  }
+
+  function clearSchoolWorkMenuCloseTimeout() {
+    if (schoolWorkMenuCloseTimeoutRef.current !== null) {
+      window.clearTimeout(schoolWorkMenuCloseTimeoutRef.current)
+      schoolWorkMenuCloseTimeoutRef.current = null
+    }
+  }
+
+  function openSchoolWorkMenu() {
+    clearSchoolWorkMenuCloseTimeout()
+    setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(true)
+  }
+
+  function closeSchoolWorkMenu() {
+    clearSchoolWorkMenuCloseTimeout()
+    setIsSchoolWorkMenuOpen(false)
+  }
+
+  function scheduleCloseSchoolWorkMenu() {
+    clearSchoolWorkMenuCloseTimeout()
+    schoolWorkMenuCloseTimeoutRef.current = window.setTimeout(() => {
+      setIsSchoolWorkMenuOpen(false)
+      schoolWorkMenuCloseTimeoutRef.current = null
+    }, 260)
+  }
+
+  function handleSchoolWorkMenuBlur(event) {
+    if (event.currentTarget.contains(event.relatedTarget)) {
+      return
+    }
+
+    scheduleCloseSchoolWorkMenu()
   }
 
   function scheduleCloseManagementMenu() {
@@ -442,6 +492,8 @@ function App() {
     nextRangeStartRef.current = 0
 
     setActiveView('home')
+    setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
     setStudents([])
     setSelectedStudent(null)
     setStatusMessage(initialStatusMessage)
@@ -737,6 +789,7 @@ function App() {
     setExpandedCounselingRecordId(record.id)
     setActiveView('counseling')
     setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
     setIsCounselingShortcutPending(true)
     setStatusMessage(`${previewStudent.name} 학생의 상담 기록을 열었습니다.`)
   }
@@ -905,6 +958,7 @@ function App() {
     setActiveView('student-create')
     setIsCounselingShortcutPending(false)
     setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
     setEditingStudentId(student.id)
     setErrorMessage('')
     setFormErrors({})
@@ -1146,6 +1200,7 @@ function App() {
   useEffect(() => {
     return () => {
       clearManagementMenuCloseTimeout()
+      clearSchoolWorkMenuCloseTimeout()
     }
   }, [])
 
@@ -2165,6 +2220,63 @@ function App() {
                 </div>
               </div>
             </div>
+
+            <div
+              className={`app-header__nav-dropdown ${
+                isSchoolWorkMenuOpen ? 'is-open' : ''
+              }`}
+              onMouseEnter={openSchoolWorkMenu}
+              onMouseLeave={scheduleCloseSchoolWorkMenu}
+              onFocus={openSchoolWorkMenu}
+              onBlur={handleSchoolWorkMenuBlur}
+            >
+              <button
+                className={`app-header__nav-button app-header__nav-button--dropdown ${
+                  isSchoolWorkMenuOpen || activeView === 'emergency-contacts'
+                    ? 'is-active'
+                    : ''
+                }`}
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={isSchoolWorkMenuOpen}
+                onClick={() => {
+                  if (isSchoolWorkMenuOpen) {
+                    closeSchoolWorkMenu()
+                  } else {
+                    openSchoolWorkMenu()
+                  }
+                }}
+              >
+                <span>학교업무</span>
+                <span className="app-header__nav-chevron" aria-hidden="true" />
+              </button>
+
+              <div
+                className="app-header__mega-menu app-header__mega-menu--compact"
+                role="menu"
+                aria-label="학교업무 메뉴"
+              >
+                <div className="app-header__mega-menu-grid app-header__mega-menu-grid--single">
+                  <button
+                    className="app-header__mega-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closeSchoolWorkMenu()
+                      handleOpenEmergencyContactsView()
+                    }}
+                  >
+                    <span className="app-header__mega-item-icon" aria-hidden="true">
+                      ☎
+                    </span>
+                    <span className="app-header__mega-item-copy">
+                      <strong>비상연락망</strong>
+                      <span>학급별 연락처 확인과 출력</span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </nav>
         </div>
 
@@ -2212,11 +2324,13 @@ function App() {
 
       {activeView === 'dashboard'
         ? <Dashboard />
-        : activeView === 'student-create'
-          ? studentCreateView
-          : activeView === 'photo-matching'
-            ? photoMatchingView
-            : studentView}
+        : activeView === 'emergency-contacts'
+          ? <EmergencyContacts />
+          : activeView === 'student-create'
+            ? studentCreateView
+            : activeView === 'photo-matching'
+              ? photoMatchingView
+              : studentView}
     </main>
   )
 }
