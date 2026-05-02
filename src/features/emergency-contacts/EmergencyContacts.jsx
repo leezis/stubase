@@ -9,9 +9,6 @@ import {
 const CONTACT_FETCH_PAGE_SIZE = 1000
 const CONTACT_PAGE_SIZE = 10
 const EMERGENCY_CONTACT_TITLE = '2026학년도 동수영중학교 비상연락망'
-const SOURCE_WEB_APP_URLS = [
-  'https://script.google.com/macros/s/AKfycbwmI-yNgQUKqXZAIC9asY0zOvIawo79Au97mAbAPjatnp1SmDVs3v7afrF-w-kCipKoPQ/exec'
-]
 const CONTACT_SELECT_COLUMNS =
   'id, name, grade, class_num, student_num, avatar_url, student_phone, parent_phone'
 const BASIC_SELECT_COLUMNS = 'id, name, grade, class_num, student_num, avatar_url'
@@ -63,38 +60,6 @@ function normalizeStudent(row) {
     avatar_url: String(row?.avatar_url ?? '').trim(),
     student_phone: formatPhoneNumber(row?.student_phone ?? ''),
     parent_phone: formatPhoneNumber(row?.parent_phone ?? ''),
-  }
-}
-
-function getSourceSchoolNumber(row) {
-  const rawNo = String(row?.no ?? '').replace(/\D/g, '')
-
-  if (/^\d{4}$/.test(rawNo)) {
-    return rawNo
-  }
-
-  const grade = String(row?.grade ?? '').replace(/\D/g, '')
-  const classNum = String(row?.cls ?? row?.class_num ?? '').replace(/\D/g, '')
-  const studentNum = String(row?.seat ?? row?.student_num ?? '').replace(/\D/g, '')
-
-  if (!grade || !classNum || !studentNum) {
-    return ''
-  }
-
-  return `${grade}${classNum}${studentNum.padStart(2, '0')}`
-}
-
-function normalizeSourceContactRow(row) {
-  const schoolNumber = getSourceSchoolNumber(row)
-
-  if (!schoolNumber) {
-    return null
-  }
-
-  return {
-    schoolNumber,
-    student_phone: formatPhoneNumber(row?.studentPhone ?? row?.student_phone ?? ''),
-    parent_phone: formatPhoneNumber(row?.parentPhone ?? row?.parent_phone ?? ''),
   }
 }
 
@@ -207,110 +172,6 @@ async function fetchEmergencyStudents() {
   }
 }
 
-function getSourceWebAppUrlVariants(baseUrl) {
-  const base = String(baseUrl ?? '').trim()
-
-  if (!base) {
-    return []
-  }
-
-  const urls = [base]
-  const authIndexes = ['0', '1', '2']
-
-  if (base.includes('/macros/s/')) {
-    authIndexes.forEach((authIndex) => {
-      urls.push(base.replace('/macros/s/', `/macros/u/${authIndex}/s/`))
-    })
-  }
-
-  urls.slice().forEach((urlText) => {
-    try {
-      const url = new URL(urlText)
-      authIndexes.forEach((authIndex) => {
-        const nextUrl = new URL(url)
-        nextUrl.searchParams.set('authuser', authIndex)
-        urls.push(nextUrl.toString())
-      })
-    } catch {
-      // Ignore malformed fallback candidates.
-    }
-  })
-
-  return Array.from(new Set(urls))
-}
-
-function callSourceWebAppOnce(baseUrl, method, args = [], timeoutMs = 60000) {
-  return new Promise((resolve, reject) => {
-    const callbackName = `emergencyContactImport${Date.now()}${Math.floor(
-      Math.random() * 100000,
-    )}`
-    const script = document.createElement('script')
-    const timerId = window.setTimeout(() => {
-      cleanup()
-      reject(new Error('원본 연락처 서버 응답 시간이 초과되었습니다.'))
-    }, timeoutMs)
-
-    function cleanup() {
-      window.clearTimeout(timerId)
-      try {
-        delete window[callbackName]
-      } catch {
-        window[callbackName] = undefined
-      }
-
-      if (script.parentNode) {
-        script.parentNode.removeChild(script)
-      }
-    }
-
-    window[callbackName] = (response) => {
-      cleanup()
-
-      if (!response?.ok) {
-        reject(new Error(response?.error || '원본 연락처를 불러오지 못했습니다.'))
-        return
-      }
-
-      resolve(response.data)
-    }
-
-    const url = new URL(baseUrl)
-    url.searchParams.set('method', method)
-    url.searchParams.set('args', JSON.stringify(args))
-    url.searchParams.set('callback', callbackName)
-
-    script.onerror = () => {
-      cleanup()
-      const error = new Error('원본 연락처 서버에 연결하지 못했습니다.')
-      error.requestUrl = url.toString()
-      reject(error)
-    }
-    script.async = true
-    script.src = url.toString()
-    document.head.appendChild(script)
-  })
-}
-
-async function callSourceWebApp(method, args = [], timeoutMs = 60000) {
-  const candidates = SOURCE_WEB_APP_URLS.flatMap(getSourceWebAppUrlVariants)
-  const errors = []
-
-  for (const candidate of candidates) {
-    try {
-      return await callSourceWebAppOnce(candidate, method, args, timeoutMs)
-    } catch (error) {
-      errors.push({
-        url: error?.requestUrl || candidate,
-        message: error?.message || String(error),
-      })
-    }
-  }
-
-  const error = new Error('원본 연락처 서버에 연결하지 못했습니다.')
-  error.attempts = errors
-  throw error
-}
-
 function getPhoneDisplay(value, emptyText) {
   const formatted = formatPhoneNumber(value)
 
@@ -324,11 +185,12 @@ function createContactCardHtml(student) {
   const schoolNumber = createSchoolNumber(student)
   const studentPhone = getPhoneDisplay(student.student_phone, '학생전화 없음')
   const parentPhone = getPhoneDisplay(student.parent_phone, '학부모전화 없음')
+  const gradeClass = `print-emergency-card--grade-${Number(student.grade) || 0}`
   const photoHtml = student.avatar_url
     ? `<img src="${escapeHtml(student.avatar_url)}" alt="${escapeHtml(student.name)} 사진" />`
     : '<span>사진없음</span>'
 
-  return `<article class="print-emergency-card">
+  return `<article class="print-emergency-card ${gradeClass}">
     <div class="print-emergency-photo">${photoHtml}</div>
     <div class="print-emergency-body">
       <div class="print-emergency-meta">${escapeHtml(`${student.grade}학년 ${student.class_num}반 ${student.student_num}번`)}</div>
@@ -405,8 +267,8 @@ function openPrintPopup(title, pagesHtml) {
         margin: 0;
         min-height: 100%;
         font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-        color: #172033;
-        background: #eef2f6;
+        color: #0f2f60;
+        background: #eef2f7;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
@@ -425,8 +287,8 @@ function openPrintPopup(title, pagesHtml) {
         gap: 2.2mm;
         padding: 5mm;
         overflow: hidden;
-        background: #ffffff;
-        border: 1px solid #d8e0eb;
+        background: linear-gradient(180deg, #ffffff 0%, #f6faff 100%);
+        border: 1px solid #c7d4e7;
       }
       .print-emergency-head {
         display: flex;
@@ -434,7 +296,7 @@ function openPrintPopup(title, pagesHtml) {
         justify-content: space-between;
         gap: 8mm;
         padding-bottom: 2.5mm;
-        border-bottom: 1px solid #d8e0eb;
+        border-bottom: 2px solid #dbe7f8;
       }
       .print-emergency-title-wrap {
         display: flex;
@@ -442,24 +304,26 @@ function openPrintPopup(title, pagesHtml) {
         gap: 3mm;
       }
       .print-emergency-title-wrap img {
-        width: 14mm;
-        height: 14mm;
+        width: 11mm;
+        height: 11mm;
         object-fit: contain;
       }
       .print-emergency-title-wrap p,
       .print-emergency-title-wrap span {
         margin: 0;
-        color: #65748b;
+        color: #50627f;
         font-size: 10.5px;
-        font-weight: 700;
+        font-weight: 800;
       }
       .print-emergency-title-wrap p {
-        color: #c2410c;
+        color: #c81e1e;
+        font-weight: 900;
       }
       .print-emergency-title-wrap h1 {
         margin: 1mm 0 0.8mm;
-        color: #172033;
-        font-size: 22px;
+        color: #15396f;
+        font-size: 24px;
+        font-weight: 900;
         line-height: 1.15;
       }
       .print-emergency-head > strong {
@@ -469,39 +333,63 @@ function openPrintPopup(title, pagesHtml) {
         min-height: 10mm;
         padding: 0 4mm;
         border-radius: 999px;
-        background: #eef6ff;
-        color: #225ea8;
+        border: 1px solid #b7c9ea;
+        background: linear-gradient(180deg, #f8fbff 0%, #dbeafe 100%);
+        color: #17408b;
         font-size: 16px;
+        font-weight: 900;
       }
       .print-emergency-grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
-        grid-auto-rows: 46mm;
+        grid-auto-rows: 47mm;
         gap: 2mm;
       }
       .print-emergency-card {
+        position: relative;
         display: grid;
-        grid-template-columns: 27mm minmax(0, 1fr);
+        grid-template-columns: 29mm minmax(0, 1fr);
         gap: 2.8mm;
         align-items: center;
         min-width: 0;
-        padding: 2mm;
-        border: 1px solid #cfdbe8;
-        border-radius: 4mm;
-        background: #fbfdff;
+        padding: 3mm 2.5mm 2mm;
+        overflow: hidden;
+        border: 1px solid #c4d5ee;
+        border-radius: 5mm;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+        box-shadow: 0 3mm 6mm rgba(21, 54, 109, 0.08);
         break-inside: avoid;
       }
+      .print-emergency-card::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 1.4mm;
+        background: linear-gradient(90deg, #1d4ed8 0%, #0ea5e9 52%, #14b8a6 100%);
+      }
+      .print-emergency-card--grade-1::before {
+        background: linear-gradient(90deg, #dc2626 0%, #f97316 52%, #fb7185 100%);
+      }
+      .print-emergency-card--grade-2::before {
+        background: linear-gradient(90deg, #0284c7 0%, #38bdf8 52%, #60a5fa 100%);
+      }
+      .print-emergency-card--grade-3::before {
+        background: linear-gradient(90deg, #15803d 0%, #22c55e 52%, #84cc16 100%);
+      }
       .print-emergency-photo {
-        width: 27mm;
-        height: 37mm;
+        position: relative;
+        z-index: 1;
+        width: 29mm;
+        height: 40mm;
         display: grid;
         place-items: center;
         overflow: hidden;
-        border-radius: 3mm;
-        background: #eef2f6;
-        color: #8391a5;
+        border: 1px solid #b9cae5;
+        border-radius: 4mm;
+        background: linear-gradient(145deg, #eef5ff 0%, #dbeafe 100%);
+        color: #4c6a98;
         font-size: 11px;
-        font-weight: 800;
+        font-weight: 900;
         text-align: center;
       }
       .print-emergency-photo img {
@@ -510,25 +398,57 @@ function openPrintPopup(title, pagesHtml) {
         object-fit: cover;
       }
       .print-emergency-body {
+        position: relative;
+        z-index: 1;
         min-width: 0;
-        height: 37mm;
+        height: 40mm;
         display: grid;
-        grid-template-rows: auto 1fr auto auto;
+        grid-template-rows: auto minmax(0, 1fr) auto auto;
         gap: 1mm;
       }
       .print-emergency-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 1.7mm;
         width: fit-content;
-        padding: 1mm 2.2mm;
+        min-height: 8mm;
+        padding: 0 3.2mm 0 2.7mm;
+        border: 1px solid #c5d6f2;
         border-radius: 999px;
-        background: #eef6ff;
-        color: #225ea8;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(224, 236, 255, 0.94) 100%);
+        color: #18407b;
         font-size: 12px;
-        font-weight: 800;
+        font-weight: 900;
+        white-space: nowrap;
+      }
+      .print-emergency-meta::before {
+        content: "";
+        width: 1.5mm;
+        height: 1.5mm;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: #2563eb;
+      }
+      .print-emergency-card--grade-1 .print-emergency-meta {
+        border-color: #f2c9cc;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 233, 235, 0.94) 100%);
+        color: #8c1d34;
+      }
+      .print-emergency-card--grade-1 .print-emergency-meta::before {
+        background: #dc2626;
+      }
+      .print-emergency-card--grade-3 .print-emergency-meta {
+        border-color: #c7dfd1;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(226, 245, 235, 0.94) 100%);
+        color: #166043;
+      }
+      .print-emergency-card--grade-3 .print-emergency-meta::before {
+        background: #16a34a;
       }
       .print-emergency-name {
         align-self: center;
-        color: #111827;
-        font-size: 20px;
+        color: #0c2d5d;
+        font-size: 22px;
         font-weight: 900;
         line-height: 1.1;
       }
@@ -538,35 +458,50 @@ function openPrintPopup(title, pagesHtml) {
       }
       .print-emergency-phone {
         display: grid;
-        grid-template-columns: 13mm minmax(0, 1fr);
+        grid-template-columns: max-content minmax(0, 1fr);
         align-items: center;
-        gap: 1.4mm;
+        gap: 2mm;
         min-width: 0;
-        padding: 0.8mm 1mm;
-        border-radius: 2mm;
-        background: #ffffff;
-        border: 1px solid #dbe5ef;
+        min-height: 9.2mm;
+        padding: 1.1mm 1.6mm;
+        border-radius: 3mm;
+        background: linear-gradient(180deg, #fbfdff 0%, #edf5ff 100%);
+        border: 1px solid #c9daf7;
+      }
+      .print-emergency-phone:nth-child(2) {
+        border-color: #cbe4de;
+        background: linear-gradient(180deg, #fcfffe 0%, #edf9f5 100%);
       }
       .print-emergency-phone span {
-        display: grid;
-        place-items: center;
-        min-height: 5.6mm;
-        border-radius: 1.6mm;
-        background: #eef2f6;
-        color: #506070;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 13mm;
+        min-height: 6.2mm;
+        padding: 0 2.2mm;
+        border-radius: 999px;
+        border: 1px solid #bfd1f2;
+        background: linear-gradient(180deg, #f8fbff 0%, #dbeafe 100%);
+        color: #18407b;
         font-size: 10px;
-        font-weight: 800;
+        font-weight: 900;
+      }
+      .print-emergency-phone:nth-child(2) span {
+        border-color: #b9d9d2;
+        background: linear-gradient(180deg, #f6fffc 0%, #d8f5ec 100%);
+        color: #155e52;
       }
       .print-emergency-phone strong {
         min-width: 0;
-        color: #172033;
-        font-size: 16px;
-        line-height: 1.1;
+        color: #17345f;
+        font-size: 16.5px;
+        line-height: 1.16;
         white-space: nowrap;
-        text-align: center;
+        font-weight: 900;
+        font-variant-numeric: tabular-nums;
       }
       .print-emergency-phone.is-missing strong {
-        color: #9aa4b2;
+        color: #a11d35;
         font-size: 12px;
         white-space: normal;
       }
@@ -741,7 +676,9 @@ function EmergencyStudentCard({ isSelected, onSelect, student }) {
 
   return (
     <button
-      className={`emergency-contact-card ${isSelected ? 'is-selected' : ''}`}
+      className={`emergency-contact-card emergency-contact-card--grade-${
+        Number(student.grade) || 0
+      } ${isSelected ? 'is-selected' : ''}`}
       type="button"
       onClick={() => onSelect(student)}
     >
@@ -755,11 +692,21 @@ function EmergencyStudentCard({ isSelected, onSelect, student }) {
         </span>
         <strong>{student.name || '-'}</strong>
         <span className="emergency-contact-card__phones">
-          <span className={studentPhone.missing ? 'is-missing' : ''}>
-            학생 <b>{studentPhone.text}</b>
+          <span
+            className={`emergency-contact-card__phone-row ${
+              studentPhone.missing ? 'is-missing' : ''
+            }`}
+          >
+            <span className="emergency-contact-card__phone-label">학생</span>
+            <b>{studentPhone.text}</b>
           </span>
-          <span className={parentPhone.missing ? 'is-missing' : ''}>
-            학부모 <b>{parentPhone.text}</b>
+          <span
+            className={`emergency-contact-card__phone-row ${
+              parentPhone.missing ? 'is-missing' : ''
+            }`}
+          >
+            <span className="emergency-contact-card__phone-label">학부모</span>
+            <b>{parentPhone.text}</b>
           </span>
         </span>
       </span>
@@ -780,7 +727,6 @@ function EmergencyContacts() {
   })
   const [hasContactColumns, setHasContactColumns] = useState(true)
   const [isLoading, setIsLoading] = useState(hasSupabaseEnv)
-  const [isImportingContacts, setIsImportingContacts] = useState(false)
   const [savingField, setSavingField] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
@@ -806,9 +752,6 @@ function EmergencyContacts() {
     () => chunkRows(selectedClassStudents, CONTACT_PAGE_SIZE),
     [selectedClassStudents],
   )
-  const missingContactCount = selectedClassStudents.filter(
-    (student) => !student.student_phone || !student.parent_phone,
-  ).length
   const classGroups = useMemo(() => {
     const grouped = new Map()
 
@@ -1030,149 +973,6 @@ function EmergencyContacts() {
     setSavingField('')
   }
 
-  async function handleImportSourceContacts() {
-    if (!supabase) {
-      return
-    }
-
-    if (!hasContactColumns) {
-      setStatusMessage(
-        '연락처 가져오기를 하려면 Supabase students 테이블에 연락처 컬럼을 먼저 추가해야 합니다.',
-      )
-      return
-    }
-
-    if (!students.length) {
-      setStatusMessage('먼저 학생명단을 불러온 뒤 다시 시도해 주세요.')
-      return
-    }
-
-    setIsImportingContacts(true)
-    setErrorMessage('')
-    setStatusMessage('원본 결석계 사이트에서 연락처를 가져오는 중입니다.')
-
-    try {
-      const sourceRows = await callSourceWebApp('getStudentsFresh', [])
-      const sourceContactMap = new Map()
-
-      ;(Array.isArray(sourceRows) ? sourceRows : [])
-        .map(normalizeSourceContactRow)
-        .filter(Boolean)
-        .forEach((row) => {
-          sourceContactMap.set(row.schoolNumber, row)
-        })
-
-      const updates = students
-        .map((student) => {
-          const source = sourceContactMap.get(createSchoolNumber(student))
-
-          if (!source) {
-            return null
-          }
-
-          const payload = {}
-
-          if (
-            source.student_phone &&
-            source.student_phone !== formatPhoneNumber(student.student_phone)
-          ) {
-            payload.student_phone = source.student_phone
-          }
-
-          if (
-            source.parent_phone &&
-            source.parent_phone !== formatPhoneNumber(student.parent_phone)
-          ) {
-            payload.parent_phone = source.parent_phone
-          }
-
-          if (!Object.keys(payload).length) {
-            return null
-          }
-
-          return {
-            id: student.id,
-            payload,
-          }
-        })
-        .filter(Boolean)
-
-      if (!updates.length) {
-        setStatusMessage('가져올 새 연락처가 없습니다.')
-        setIsImportingContacts(false)
-        return
-      }
-
-      const updatedContactMap = new Map()
-      const batchSize = 12
-
-      for (let index = 0; index < updates.length; index += batchSize) {
-        const batch = updates.slice(index, index + batchSize)
-        const results = await Promise.all(
-          batch.map((item) =>
-            supabase
-              .from('students')
-              .update(item.payload)
-              .eq('id', item.id)
-              .select('id, student_phone, parent_phone')
-              .single(),
-          ),
-        )
-
-        const failed = results.find((result) => result.error)
-
-        if (failed?.error) {
-          if (hasMissingContactColumnError(failed.error)) {
-            setHasContactColumns(false)
-          }
-
-          throw failed.error
-        }
-
-        results.forEach((result) => {
-          if (!result.data?.id) {
-            return
-          }
-
-          updatedContactMap.set(result.data.id, {
-            student_phone: formatPhoneNumber(result.data.student_phone),
-            parent_phone: formatPhoneNumber(result.data.parent_phone),
-          })
-        })
-
-        setStatusMessage(
-          `원본 연락처를 저장하는 중입니다. (${Math.min(
-            index + batch.length,
-            updates.length,
-          )}/${updates.length})`,
-        )
-      }
-
-      setStudents((previous) =>
-        previous.map((student) => {
-          const updated = updatedContactMap.get(student.id)
-
-          return updated ? { ...student, ...updated } : student
-        }),
-      )
-
-      if (selectedStudentId && updatedContactMap.has(selectedStudentId)) {
-        const updated = updatedContactMap.get(selectedStudentId)
-        setPhoneDrafts({
-          student_phone: updated.student_phone,
-          parent_phone: updated.parent_phone,
-        })
-      }
-
-      setStatusMessage(`원본 연락처 ${updatedContactMap.size}명을 반영했습니다.`)
-    } catch (error) {
-      setErrorMessage(getEmergencyContactErrorMessage(error))
-      setStatusMessage('원본 연락처 가져오기에 실패했습니다.')
-    } finally {
-      setIsImportingContacts(false)
-    }
-  }
-
   function handlePrintSelectedClass() {
     if (!selectedClassStudents.length) {
       setStatusMessage('출력할 학생이 없습니다.')
@@ -1254,17 +1054,9 @@ function EmergencyContacts() {
             className="secondary-button"
             type="button"
             onClick={() => void loadEmergencyContacts({ silent: false })}
-            disabled={isLoading || isImportingContacts}
+            disabled={isLoading}
           >
             {isLoading ? '새로고침 중...' : '학생명단 새로고침'}
-          </button>
-          <button
-            className="secondary-button"
-            type="button"
-            onClick={() => void handleImportSourceContacts()}
-            disabled={isLoading || isImportingContacts || !students.length}
-          >
-            {isImportingContacts ? '가져오는 중...' : '원본 연락처 가져오기'}
           </button>
           <button
             className="ghost-button"
@@ -1295,21 +1087,6 @@ function EmergencyContacts() {
 
       <section className="emergency-contacts-layout">
         <section className="emergency-contacts-preview">
-          <div className="emergency-contacts-paper-head">
-            <div>
-              <span>개인정보보호 유의</span>
-              <h2>{EMERGENCY_CONTACT_TITLE}</h2>
-              <p>
-                {selectedGrade}학년 {selectedClass}반 · 학생{' '}
-                {selectedClassStudents.length}명
-              </p>
-            </div>
-
-            <strong>
-              {selectedGrade}-{selectedClass}
-            </strong>
-          </div>
-
           <div className="emergency-contact-pages">
             {pages.length ? (
               pages.map((pageRows, pageIndex) => (
@@ -1317,6 +1094,28 @@ function EmergencyContacts() {
                   className="emergency-contact-page"
                   key={`${selectedGrade}-${selectedClass}-${pageIndex}`}
                 >
+                  <div className="emergency-contacts-paper-head">
+                    <div className="emergency-contacts-paper-title-wrap">
+                      <img
+                        className="emergency-contacts-paper-logo"
+                        src={schoolLogoUrl}
+                        alt=""
+                      />
+                      <div>
+                        <span>개인정보보호 유의</span>
+                        <h2>{EMERGENCY_CONTACT_TITLE}</h2>
+                        <p>
+                          {selectedGrade}학년 {selectedClass}반 · 학생{' '}
+                          {selectedClassStudents.length}명
+                        </p>
+                      </div>
+                    </div>
+
+                    <strong>
+                      {selectedGrade}-{selectedClass}
+                    </strong>
+                  </div>
+
                   <div className="emergency-contact-card-grid">
                     {pageRows.map((student) => (
                       <EmergencyStudentCard
@@ -1400,10 +1199,6 @@ function EmergencyContacts() {
               <article>
                 <span>출력 페이지</span>
                 <strong>{pages.length}</strong>
-              </article>
-              <article>
-                <span>연락처 확인</span>
-                <strong>{missingContactCount}</strong>
               </article>
             </div>
           </section>

@@ -5,6 +5,7 @@ import CounselingForm, {
 } from './features/counseling/CounselingForm.jsx'
 import Dashboard from './features/dashboard/Dashboard.jsx'
 import EmergencyContacts from './features/emergency-contacts/EmergencyContacts.jsx'
+import PersonalGradeRecords from './features/personal-grade-records/PersonalGradeRecords.jsx'
 import Login from './features/auth/Login.jsx'
 import './App.css'
 import {
@@ -411,6 +412,13 @@ function App() {
 
   function handleOpenEmergencyContactsView() {
     setActiveView('emergency-contacts')
+    setIsCounselingShortcutPending(false)
+    setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
+  }
+
+  function handleOpenPersonalGradeRecordsView() {
+    setActiveView('personal-grade-records')
     setIsCounselingShortcutPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
@@ -2234,7 +2242,9 @@ function App() {
             >
               <button
                 className={`app-header__nav-button app-header__nav-button--dropdown ${
-                  isSchoolWorkMenuOpen || activeView === 'emergency-contacts'
+                  isSchoolWorkMenuOpen ||
+                  activeView === 'emergency-contacts' ||
+                  activeView === 'personal-grade-records'
                     ? 'is-active'
                     : ''
                 }`}
@@ -2274,6 +2284,24 @@ function App() {
                     <span className="app-header__mega-item-copy">
                       <strong>비상연락망</strong>
                       <span>학급별 연락처 확인과 출력</span>
+                    </span>
+                  </button>
+
+                  <button
+                    className="app-header__mega-item"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closeSchoolWorkMenu()
+                      handleOpenPersonalGradeRecordsView()
+                    }}
+                  >
+                    <span className="app-header__mega-item-icon" aria-hidden="true">
+                      표
+                    </span>
+                    <span className="app-header__mega-item-copy">
+                      <strong>개인내신성적관리부</strong>
+                      <span>개인별 내신 성적 자료 관리</span>
                     </span>
                   </button>
                 </div>
@@ -2328,11 +2356,13 @@ function App() {
         ? <Dashboard />
         : activeView === 'emergency-contacts'
           ? <EmergencyContacts />
-          : activeView === 'student-create'
-            ? studentCreateView
-            : activeView === 'photo-matching'
-              ? photoMatchingView
-              : studentView}
+          : activeView === 'personal-grade-records'
+            ? <PersonalGradeRecords />
+            : activeView === 'student-create'
+              ? studentCreateView
+              : activeView === 'photo-matching'
+                ? photoMatchingView
+                : studentView}
     </main>
   )
 }
