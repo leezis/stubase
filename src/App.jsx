@@ -5,7 +5,7 @@ import CounselingForm, {
 } from './features/counseling/CounselingForm.jsx'
 import Dashboard from './features/dashboard/Dashboard.jsx'
 import EmergencyContacts from './features/emergency-contacts/EmergencyContacts.jsx'
-import PersonalGradeRecords from './features/personal-grade-records/PersonalGradeRecords.jsx'
+import personalGradeRecordsModule from './features/personal-grade-records/index.js'
 import Login from './features/auth/Login.jsx'
 import './App.css'
 import {
@@ -22,6 +22,27 @@ const PAGE_SIZE = 20
 const COUNSELING_COUNT_PAGE_SIZE = 1000
 const APP_BUILD_LABEL = 'build 2026-04-21 b1'
 const PRODUCTION_SITE_URL = 'https://stubase.pages.dev/'
+
+const emergencyContactsModule = {
+  id: 'emergency-contacts',
+  category: 'school-work',
+  menu: {
+    icon: '☎',
+    title: '비상연락망',
+    description: '학급별 연락처 확인과 출력',
+  },
+  Component: EmergencyContacts,
+}
+
+const SCHOOL_WORK_MODULES = [
+  emergencyContactsModule,
+  personalGradeRecordsModule,
+]
+
+const emptyStudentWorkspaceFilters = {
+  selectedGrade: '',
+  selectedClass: '',
+}
 
 const CLASS_FILTER_OPTIONS = Array.from({ length: 3 }, (_, gradeIndex) =>
   Array.from({ length: 7 }, (_, classIndex) => ({
@@ -117,13 +138,6 @@ function verifyImageSource(url) {
   })
 }
 
-function normalizeSearchKeyword(value) {
-  return String(value ?? '')
-    .trim()
-    .replace(/[,%()]/g, ' ')
-    .replace(/\s+/g, ' ')
-}
-
 function getAuthRedirectUrl() {
   if (typeof window === 'undefined') {
     return PRODUCTION_SITE_URL
@@ -144,28 +158,6 @@ function getAuthRedirectUrl() {
   }
 
   return `${origin}/`
-}
-
-function parseSchoolNumberKeyword(value) {
-  const normalizedValue = String(value ?? '').replace(/\s+/g, '')
-
-  if (!/^\d{4}$/.test(normalizedValue)) {
-    return null
-  }
-
-  const grade = Number(normalizedValue.slice(0, 1))
-  const classNum = Number(normalizedValue.slice(1, 2))
-  const studentNum = Number(normalizedValue.slice(2, 4))
-
-  if (!grade || !classNum || !studentNum) {
-    return null
-  }
-
-  return {
-    grade,
-    classNum,
-    studentNum,
-  }
 }
 
 function validateStudentForm(values) {
@@ -305,8 +297,8 @@ function App() {
   const [activeView, setActiveView] = useState('home')
   const [students, setStudents] = useState([])
   const [selectedStudent, setSelectedStudent] = useState(null)
-  const [statusMessage, setStatusMessage] = useState(initialStatusMessage)
-  const [errorMessage, setErrorMessage] = useState('')
+  const [, setStatusMessage] = useState(initialStatusMessage)
+  const [, setErrorMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoadingMoreStudents, setIsLoadingMoreStudents] = useState(false)
@@ -321,22 +313,66 @@ function App() {
   const [editingStudentId, setEditingStudentId] = useState(null)
   const [formValues, setFormValues] = useState(initialStudentFormValues)
   const [formErrors, setFormErrors] = useState({})
-  const [searchTerm, setSearchTerm] = useState('')
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [selectedGrade, setSelectedGrade] = useState('')
   const [selectedClass, setSelectedClass] = useState('')
+  const [schoolWorkStudentFilters, setSchoolWorkStudentFilters] = useState({})
+  const [schoolWorkDataRefreshKeys, setSchoolWorkDataRefreshKeys] = useState({})
   const [counselingRefreshKey, setCounselingRefreshKey] = useState(0)
   const [counselingCountMap, setCounselingCountMap] = useState({})
   const [expandedCounselingRecordId, setExpandedCounselingRecordId] =
     useState(null)
+  const [schoolWorkSelectedStudentIds, setSchoolWorkSelectedStudentIds] =
+    useState({})
+  const [schoolWorkHeaderActions, setSchoolWorkHeaderActions] = useState(null)
+  const [toastMessage, setToastMessage] = useState('')
+  const [toastTone, setToastTone] = useState('info')
 
   const authUserId = authUser?.id ?? ''
   const selectedStudentId = selectedStudent?.id ?? null
+  const activeSchoolWorkModule = SCHOOL_WORK_MODULES.find(
+    (module) => module.id === activeView,
+  )
+  const isPersonalGradeRecordsView =
+    activeSchoolWorkModule?.id === personalGradeRecordsModule.id
+  const ActiveSchoolWorkModule = activeSchoolWorkModule?.Component ?? null
+  const ActiveStudentWorkspaceHeaderActions =
+    activeSchoolWorkModule?.studentWorkspace?.HeaderActions ?? null
+  const ActiveStudentWorkspacePlaceholderDetails =
+    activeSchoolWorkModule?.studentWorkspace?.PlaceholderDetails ?? null
+  const activeSchoolWorkDataRefreshKey = activeSchoolWorkModule
+    ? schoolWorkDataRefreshKeys[activeSchoolWorkModule.id] ?? 0
+    : 0
+  const isCounselingView = activeView === 'counseling'
+  const isSchoolWorkStudentWorkspaceView = Boolean(
+    activeSchoolWorkModule?.usesStudentWorkspace,
+  )
+  const activeSchoolWorkSelectedStudentId = isSchoolWorkStudentWorkspaceView
+    ? schoolWorkSelectedStudentIds[activeSchoolWorkModule.id] ?? null
+    : null
+  const activeWorkspaceSelectedStudentId = isSchoolWorkStudentWorkspaceView
+    ? activeSchoolWorkSelectedStudentId
+    : selectedStudentId
+  const activeSchoolWorkDefaultFilters =
+    activeSchoolWorkModule?.studentWorkspace?.defaultFilters ??
+    emptyStudentWorkspaceFilters
+  const activeSchoolWorkStudentFilters = isSchoolWorkStudentWorkspaceView
+    ? schoolWorkStudentFilters[activeSchoolWorkModule.id] ??
+      activeSchoolWorkDefaultFilters
+    : emptyStudentWorkspaceFilters
+  const activeSelectedGrade = isSchoolWorkStudentWorkspaceView
+    ? activeSchoolWorkStudentFilters.selectedGrade
+    : selectedGrade
+  const activeSelectedClass = isSchoolWorkStudentWorkspaceView
+    ? activeSchoolWorkStudentFilters.selectedClass
+    : selectedClass
+  const isStudentDetailWorkspaceView =
+    isCounselingView || isSchoolWorkStudentWorkspaceView
   const isStudentWorkspaceView =
     activeView === 'home' ||
-    activeView === 'counseling' ||
+    isStudentDetailWorkspaceView ||
     activeView === 'student-create' ||
     activeView === 'photo-matching'
+  const isCounselingDataWorkspaceView = activeView === 'home' || isCounselingView
   const nextRangeStartRef = useRef(0)
   const latestRequestIdRef = useRef(0)
   const counselingCountRequestIdRef = useRef(0)
@@ -350,7 +386,7 @@ function App() {
   const studentDiscoveryRef = useRef(null)
   const avatarFileInputRef = useRef(null)
   const avatarObjectUrlsRef = useRef({})
-  const [isCounselingShortcutPending, setIsCounselingShortcutPending] =
+  const [isStudentDetailScrollPending, setIsStudentDetailScrollPending] =
     useState(false)
   const [isManagementMenuOpen, setIsManagementMenuOpen] = useState(false)
   const [isSchoolWorkMenuOpen, setIsSchoolWorkMenuOpen] = useState(false)
@@ -365,9 +401,74 @@ function App() {
     setSelectedStudent(null)
   }
 
+  function updateActiveSchoolWorkStudentFilters(updater) {
+    const moduleId = activeSchoolWorkModule?.id
+
+    if (!moduleId) {
+      return
+    }
+
+    setSchoolWorkStudentFilters((previous) => {
+      const currentFilters =
+        previous[moduleId] ??
+        activeSchoolWorkModule?.studentWorkspace?.defaultFilters ??
+        emptyStudentWorkspaceFilters
+      const nextFilters =
+        typeof updater === 'function'
+          ? updater(currentFilters)
+          : { ...currentFilters, ...updater }
+
+      return {
+        ...previous,
+        [moduleId]: nextFilters,
+      }
+    })
+  }
+
+  function clearSchoolWorkSelectedStudent(moduleId = activeSchoolWorkModule?.id) {
+    if (!moduleId) {
+      return
+    }
+
+    setSchoolWorkSelectedStudentIds((previous) => {
+      if (!previous[moduleId]) {
+        return previous
+      }
+
+      const next = { ...previous }
+      delete next[moduleId]
+      return next
+    })
+  }
+
+  function refreshSchoolWorkModuleData(moduleId = activeSchoolWorkModule?.id) {
+    if (!moduleId) {
+      return
+    }
+
+    setSchoolWorkDataRefreshKeys((previous) => ({
+      ...previous,
+      [moduleId]: (previous[moduleId] ?? 0) + 1,
+    }))
+  }
+
+  function showToast(message, tone = 'info') {
+    setToastMessage(message)
+    setToastTone(tone)
+  }
+
+  function clearActiveWorkspaceSelectedStudent() {
+    if (isSchoolWorkStudentWorkspaceView) {
+      clearSchoolWorkSelectedStudent()
+      return
+    }
+
+    clearSelectedStudent()
+  }
+
   function handleOpenHomeView() {
     setActiveView('home')
-    setIsCounselingShortcutPending(false)
+    setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
   }
@@ -386,42 +487,76 @@ function App() {
       setStatusMessage(`${nextStudent.name} 학생의 상담 화면을 열었습니다.`)
     }
 
-    setIsCounselingShortcutPending(true)
+    setIsStudentDetailScrollPending(true)
   }
 
   function handleOpenDashboardView() {
     setActiveView('dashboard')
-    setIsCounselingShortcutPending(false)
+    setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
   }
 
   function handleOpenStudentFormView() {
     setActiveView('student-create')
-    setIsCounselingShortcutPending(false)
+    setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
   }
 
   function handleOpenBatchUploadView() {
     setActiveView('photo-matching')
-    setIsCounselingShortcutPending(false)
+    setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
   }
 
-  function handleOpenEmergencyContactsView() {
-    setActiveView('emergency-contacts')
-    setIsCounselingShortcutPending(false)
-    setIsManagementMenuOpen(false)
-    setIsSchoolWorkMenuOpen(false)
-  }
+  function handleOpenSchoolWorkModule(moduleId) {
+    const nextModule = SCHOOL_WORK_MODULES.find((module) => module.id === moduleId)
+    const defaultFilters =
+      nextModule?.studentWorkspace?.defaultFilters ?? emptyStudentWorkspaceFilters
+    const savedStudentId = nextModule?.usesStudentWorkspace
+      ? schoolWorkSelectedStudentIds[moduleId] ?? null
+      : null
+    const savedStudent = savedStudentId
+      ? students.find((student) => student.id === savedStudentId) ?? null
+      : null
+    const defaultFilteredStudent = nextModule?.usesStudentWorkspace
+      ? students.find((student) => {
+          const isGradeMatched =
+            !defaultFilters.selectedGrade ||
+            student.grade === Number(defaultFilters.selectedGrade)
+          const isClassMatched =
+            !defaultFilters.selectedClass ||
+            student.class_num === Number(defaultFilters.selectedClass)
 
-  function handleOpenPersonalGradeRecordsView() {
-    setActiveView('personal-grade-records')
-    setIsCounselingShortcutPending(false)
+          return isGradeMatched && isClassMatched
+        }) ?? null
+      : null
+    const nextStudent = nextModule?.usesStudentWorkspace
+      ? savedStudent ?? defaultFilteredStudent
+      : null
+
+    setActiveView(moduleId)
+    setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
+
+    if (!nextModule?.usesStudentWorkspace) {
+      return
+    }
+
+    setIsStudentDetailScrollPending(true)
+
+    if (nextStudent) {
+      setSchoolWorkSelectedStudentIds((previous) => ({
+        ...previous,
+        [nextModule.id]: nextStudent.id,
+      }))
+      setStatusMessage(`${nextStudent.name} 학생의 ${nextModule.menu.title} 화면을 열었습니다.`)
+    } else {
+      setStatusMessage(`${nextModule.menu.title} 화면을 열었습니다.`)
+    }
   }
 
   function clearManagementMenuCloseTimeout() {
@@ -504,8 +639,10 @@ function App() {
     setActiveView('home')
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
+    setIsStudentDetailScrollPending(false)
     setStudents([])
     setSelectedStudent(null)
+    setSchoolWorkSelectedStudentIds({})
     setStatusMessage(initialStatusMessage)
     setErrorMessage('')
     setIsLoading(false)
@@ -522,15 +659,14 @@ function App() {
     setEditingStudentId(null)
     setFormValues(initialStudentFormValues)
     setFormErrors({})
-    setSearchTerm('')
-    setDebouncedSearchTerm('')
     setSelectedGrade('')
     setSelectedClass('')
+    setSchoolWorkStudentFilters({})
     setCounselingRefreshKey(0)
     setCounselingCountMap({})
   })
 
-  function buildStudentQuery(searchKeyword, gradeValue, classValue) {
+  function buildStudentQuery(gradeValue, classValue) {
     let query = supabase
       .from('students')
       .select('id, name, grade, class_num, student_num, avatar_url', {
@@ -546,25 +682,6 @@ function App() {
 
     if (gradeValue && classValue) {
       query = query.eq('class_num', Number(classValue))
-    }
-
-    if (searchKeyword) {
-      const orFilters = [`name.ilike.%${searchKeyword}%`]
-      const parsedSchoolNumber = parseSchoolNumberKeyword(searchKeyword)
-
-      if (parsedSchoolNumber) {
-        orFilters.push(
-          `and(grade.eq.${parsedSchoolNumber.grade},class_num.eq.${parsedSchoolNumber.classNum},student_num.eq.${parsedSchoolNumber.studentNum})`,
-        )
-      } else if (/^\d+$/.test(searchKeyword)) {
-        const numericKeyword = Number(searchKeyword)
-
-        if (numericKeyword >= 1 && numericKeyword <= 99) {
-          orFilters.push(`student_num.eq.${numericKeyword}`)
-        }
-      }
-
-      query = query.or(orFilters.join(','))
     }
 
     return query
@@ -600,10 +717,9 @@ function App() {
     const requestId = latestRequestIdRef.current + 1
     latestRequestIdRef.current = requestId
 
-    const keyword = normalizeSearchKeyword(debouncedSearchTerm)
-    const gradeValue = selectedGrade
-    const classValue = selectedClass
-    const hasQueryFilters = Boolean(keyword || gradeValue || classValue)
+    const gradeValue = activeSelectedGrade
+    const classValue = activeSelectedClass
+    const hasQueryFilters = Boolean(gradeValue || classValue)
     const from = reset ? 0 : nextRangeStartRef.current
     const to = from + PAGE_SIZE - 1
 
@@ -616,7 +732,7 @@ function App() {
 
       setStatusMessage(
         hasQueryFilters
-          ? '검색 결과를 불러오는 중입니다.'
+          ? '선택한 학급 학생을 불러오는 중입니다.'
           : 'students 테이블을 불러오는 중입니다.',
       )
     } else {
@@ -626,11 +742,7 @@ function App() {
 
     setErrorMessage('')
 
-    const { data, error, count } = await buildStudentQuery(
-      keyword,
-      gradeValue,
-      classValue,
-    ).range(from, to)
+    const { data, error, count } = await buildStudentQuery(gradeValue, classValue).range(from, to)
 
     if (requestId !== latestRequestIdRef.current) {
       return
@@ -680,7 +792,7 @@ function App() {
     } else {
       setStatusMessage(
         hasQueryFilters
-          ? `검색 결과 ${nextTotalCount}명 중 ${nextLoadedCount}명을 표시하고 있습니다.`
+          ? `선택한 조건의 학생 ${nextTotalCount}명 중 ${nextLoadedCount}명을 표시하고 있습니다.`
           : `전체 학생 ${nextTotalCount}명 중 ${nextLoadedCount}명을 표시하고 있습니다.`,
       )
     }
@@ -780,6 +892,21 @@ function App() {
   }
 
   function handleSelectStudent(student, sourceView = activeView) {
+    const sourceSchoolWorkModule = SCHOOL_WORK_MODULES.find(
+      (module) => module.id === sourceView,
+    )
+
+    if (sourceSchoolWorkModule?.usesStudentWorkspace) {
+      setSchoolWorkSelectedStudentIds((previous) => ({
+        ...previous,
+        [sourceSchoolWorkModule.id]: student.id,
+      }))
+      setStatusMessage(
+        `${student.name} 학생의 ${sourceSchoolWorkModule.menu.title} 화면을 열었습니다.`,
+      )
+      return
+    }
+
     setSelectedStudent(student)
     setCounselingRefreshKey(0)
     setExpandedCounselingRecordId(null)
@@ -800,8 +927,56 @@ function App() {
     setActiveView('counseling')
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
-    setIsCounselingShortcutPending(true)
+    setIsStudentDetailScrollPending(true)
     setStatusMessage(`${previewStudent.name} 학생의 상담 기록을 열었습니다.`)
+  }
+
+  function handleOpenPreviewStudentCounseling() {
+    if (!previewStudent) {
+      return
+    }
+
+    setSelectedStudent(previewStudent)
+    setCounselingRefreshKey(0)
+    setExpandedCounselingRecordId(null)
+    setActiveView('counseling')
+    setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
+    setIsStudentDetailScrollPending(true)
+    setStatusMessage(`${previewStudent.name} 학생의 상담 화면을 열었습니다.`)
+  }
+
+  function handleOpenPreviewStudentPersonalGradeRecords() {
+    if (!previewStudent) {
+      return
+    }
+
+    const moduleId = personalGradeRecordsModule.id
+
+    setSchoolWorkSelectedStudentIds((previous) => ({
+      ...previous,
+      [moduleId]: previewStudent.id,
+    }))
+    setSchoolWorkStudentFilters((previous) => {
+      const currentFilters =
+        previous[moduleId] ??
+        personalGradeRecordsModule.studentWorkspace?.defaultFilters ??
+        emptyStudentWorkspaceFilters
+
+      return {
+        ...previous,
+        [moduleId]: {
+          ...currentFilters,
+          selectedGrade: String(previewStudent.grade ?? ''),
+          selectedClass: String(previewStudent.class_num ?? ''),
+        },
+      }
+    })
+    setActiveView(moduleId)
+    setIsManagementMenuOpen(false)
+    setIsSchoolWorkMenuOpen(false)
+    setIsStudentDetailScrollPending(true)
+    setStatusMessage(`${previewStudent.name} 학생의 개인내신성적관리부 화면을 열었습니다.`)
   }
 
   function handleCounselingSaveSuccess(studentName) {
@@ -966,7 +1141,7 @@ function App() {
 
   function _handleEditStudent(student) {
     setActiveView('student-create')
-    setIsCounselingShortcutPending(false)
+    setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
     setEditingStudentId(student.id)
@@ -1015,6 +1190,13 @@ function App() {
       clearSelectedStudent()
     }
 
+    setSchoolWorkSelectedStudentIds((previous) => {
+      const nextEntries = Object.entries(previous).filter(
+        ([, selectedId]) => selectedId !== student.id,
+      )
+      return Object.fromEntries(nextEntries)
+    })
+
     setDeletingStudentId(null)
     setStatusMessage(`${student.name} 학생을 삭제했습니다.`)
     await loadStudents({ reset: true, showRefreshState: true })
@@ -1040,18 +1222,21 @@ function App() {
     })
   }
 
-  function handleSearchTermChange(event) {
-    setSearchTerm(event.target.value)
-    clearSelectedStudent()
-  }
-
   function handleClassChipClick(nextGrade, nextClass) {
     const shouldReset =
-      selectedGrade === nextGrade && selectedClass === nextClass
+      activeSelectedGrade === nextGrade && activeSelectedClass === nextClass
 
-    setSelectedGrade(shouldReset ? '' : nextGrade)
-    setSelectedClass(shouldReset ? '' : nextClass)
-    clearSelectedStudent()
+    if (isSchoolWorkStudentWorkspaceView) {
+      updateActiveSchoolWorkStudentFilters({
+        selectedGrade: shouldReset ? '' : nextGrade,
+        selectedClass: shouldReset ? '' : nextClass,
+      })
+    } else {
+      setSelectedGrade(shouldReset ? '' : nextGrade)
+      setSelectedClass(shouldReset ? '' : nextClass)
+    }
+
+    clearActiveWorkspaceSelectedStudent()
   }
 
   async function handleSubmitStudent(event) {
@@ -1205,7 +1390,7 @@ function App() {
       window.removeEventListener('resize', syncStickyHeights)
       resizeObserver.disconnect()
     }
-  }, [activeView, selectedGrade])
+  }, [activeSelectedGrade, activeView])
 
   useEffect(() => {
     return () => {
@@ -1215,14 +1400,18 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!toastMessage) {
+      return
+    }
+
     const timeoutId = window.setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm)
-    }, 320)
+      setToastMessage('')
+    }, 2400)
 
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [searchTerm])
+  }, [toastMessage])
 
   useEffect(() => {
     if (!supabase) {
@@ -1323,9 +1512,8 @@ function App() {
       window.clearTimeout(timeoutId)
     }
   }, [
-    debouncedSearchTerm,
-    selectedGrade,
-    selectedClass,
+    activeSelectedGrade,
+    activeSelectedClass,
     activeView,
     authUserId,
     isStudentWorkspaceView,
@@ -1370,7 +1558,7 @@ function App() {
   ])
 
   useEffect(() => {
-    if (activeView !== 'counseling' || !isCounselingShortcutPending) {
+    if (!isStudentDetailWorkspaceView || !isStudentDetailScrollPending) {
       return
     }
 
@@ -1384,7 +1572,7 @@ function App() {
           block: 'start',
           inline: 'nearest',
         })
-        setIsCounselingShortcutPending(false)
+        setIsStudentDetailScrollPending(false)
       })
     })
 
@@ -1392,10 +1580,14 @@ function App() {
       window.cancelAnimationFrame(frameId)
       window.cancelAnimationFrame(nestedFrameId)
     }
-  }, [activeView, isCounselingShortcutPending])
+  }, [isStudentDetailScrollPending, isStudentDetailWorkspaceView])
 
   useEffect(() => {
-    if (!supabase || !authUserId || !isStudentWorkspaceView || !students.length) {
+    if (!isCounselingDataWorkspaceView) {
+      return
+    }
+
+    if (!supabase || !authUserId || !students.length) {
       const timeoutId = window.setTimeout(() => {
         setCounselingCountMap({})
       }, 0)
@@ -1467,7 +1659,7 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [authUserId, isStudentWorkspaceView, students])
+  }, [authUserId, isCounselingDataWorkspaceView, students])
 
   const hasVisibleStudents = students.length > 0
   const isEditing = editingStudentId !== null
@@ -1479,10 +1671,13 @@ function App() {
     isUploadingAvatar ||
     isSigningOut ||
     deletingStudentId !== null
-  const hasActiveFilters = Boolean(
-    searchTerm.trim() || selectedGrade || selectedClass,
-  )
-  const isCounselingView = activeView === 'counseling'
+  const hasActiveFilters = Boolean(activeSelectedGrade || activeSelectedClass)
+  const activeSchoolWorkSelectedStudent = activeSchoolWorkSelectedStudentId
+    ? students.find((student) => student.id === activeSchoolWorkSelectedStudentId) ?? null
+    : null
+  const activeWorkspaceSelectedStudent = isSchoolWorkStudentWorkspaceView
+    ? activeSchoolWorkSelectedStudent
+    : selectedStudent
   const visibleSelectedStudent =
     students.find((student) => student.id === selectedStudentId) ?? null
   const previewStudent = visibleSelectedStudent
@@ -1490,11 +1685,26 @@ function App() {
     ? counselingCountMap[previewStudent.id] ?? 0
     : 0
   const groupedStudents = groupStudentsBySchoolPrefix(students)
+  const defaultStudentWorkspaceHero = {
+    badge: 'Student Dashboard',
+    title: '학생 목록과 상담 기록을 한 번에 관리해요',
+    description:
+      '학급 선택과 무한 스크롤 기반 목록으로 많은 학생 데이터도 빠르게 확인할 수 있도록 구성했습니다.',
+  }
+  const studentWorkspaceHero = isSchoolWorkStudentWorkspaceView
+    ? {
+        ...defaultStudentWorkspaceHero,
+        ...activeSchoolWorkModule?.studentWorkspace?.hero,
+      }
+    : defaultStudentWorkspaceHero
+  const activeClassFilterOptions =
+    activeSchoolWorkModule?.studentWorkspace?.classFilterOptions ??
+    CLASS_FILTER_OPTIONS
 
   const studentListSection = hasVisibleStudents ? (
     <section
       className={`list-card list-card--student-grid ${
-        isCounselingView ? 'list-card--counseling' : 'list-card--home'
+        isStudentDetailWorkspaceView ? 'list-card--counseling' : 'list-card--home'
       }`}
     >
       <div className="card-header card-header--student-list">
@@ -1508,7 +1718,7 @@ function App() {
 
       <div
         className={`student-grid ${
-          isCounselingView ? 'student-grid--counseling' : 'student-grid--home'
+          isStudentDetailWorkspaceView ? 'student-grid--counseling' : 'student-grid--home'
         }`}
         ref={studentGridScrollRef}
       >
@@ -1516,7 +1726,7 @@ function App() {
           {groupedStudents.map((group) => (
             <ul
               className={`student-grid__list ${
-                isCounselingView
+                isStudentDetailWorkspaceView
                   ? 'student-grid__list--counseling'
                   : 'student-grid__list--home'
               }`}
@@ -1525,10 +1735,12 @@ function App() {
               {group.students.map((student) => (
                 <li
                   className={`student-grid__item student-grid__item--grade-${student.grade} ${
-                    isCounselingView
+                    isStudentDetailWorkspaceView
                       ? 'student-grid__item--counseling'
                       : 'student-grid__item--home'
-                  } ${selectedStudentId === student.id ? 'is-selected' : ''}`}
+                  } ${
+                    activeWorkspaceSelectedStudentId === student.id ? 'is-selected' : ''
+                  }`}
                   key={student.id}
                   role="button"
                   tabIndex={0}
@@ -1542,7 +1754,7 @@ function App() {
                 >
                   <div
                     className={`student-avatar student-grid__avatar ${
-                      isCounselingView ? 'student-grid__avatar--counseling' : ''
+                      isStudentDetailWorkspaceView ? 'student-grid__avatar--counseling' : ''
                     }`}
                   >
                     {getDisplayedStudentAvatarSrc(student) ? (
@@ -1550,7 +1762,11 @@ function App() {
                         src={getDisplayedStudentAvatarSrc(student)}
                         alt=""
                         loading="lazy"
-                        onError={() => setAvatarLoadFailed(student.id, true)}
+                        onError={() => {
+                          if (!isSchoolWorkStudentWorkspaceView) {
+                            setAvatarLoadFailed(student.id, true)
+                          }
+                        }}
                       />
                     ) : (
                       <span
@@ -1566,12 +1782,12 @@ function App() {
 
                   <div
                     className={`student-grid__content ${
-                      isCounselingView ? 'student-grid__content--counseling' : ''
+                      isStudentDetailWorkspaceView ? 'student-grid__content--counseling' : ''
                     }`}
                   >
                     <div
                       className={`student-grid__identity ${
-                        isCounselingView ? 'student-grid__identity--counseling' : ''
+                        isStudentDetailWorkspaceView ? 'student-grid__identity--counseling' : ''
                       }`}
                     >
                       <p className="student-grid__school-number">
@@ -1580,7 +1796,9 @@ function App() {
                       <strong className="student-grid__name">{student.name}</strong>
                     </div>
                     <span className="student-grid__count">
-                      상담 {counselingCountMap[student.id] ?? 0}회
+                      {isSchoolWorkStudentWorkspaceView
+                        ? activeSchoolWorkModule?.studentWorkspace?.studentBadge ?? '선택'
+                        : `상담 ${counselingCountMap[student.id] ?? 0}회`}
                     </span>
                   </div>
 
@@ -1654,6 +1872,24 @@ function App() {
                 <span className="student-grid__count">
                   상담 {previewStudentCounselingCount}회
                 </span>
+                <div className="student-summary-actions">
+                  <button
+                    className="student-summary-action student-summary-action--counseling"
+                    type="button"
+                    onClick={handleOpenPreviewStudentCounseling}
+                  >
+                    학생상담
+                  </button>
+                  {Number(previewStudent.grade) === 1 ? (
+                    <button
+                      className="student-summary-action student-summary-action--grade-record"
+                      type="button"
+                      onClick={handleOpenPreviewStudentPersonalGradeRecords}
+                    >
+                      내신관리
+                    </button>
+                  ) : null}
+                </div>
               </div>
             </section>
           ) : null
@@ -1674,7 +1910,7 @@ function App() {
           <p className="section-label">Create Student</p>
           <h2>{isEditing ? '학생 수정' : '학생 추가'}</h2>
           <p className="form-description">
-            학생 추가, 수정, 삭제 이후에도 목록과 검색 결과가 자연스럽게
+            학생 추가, 수정, 삭제 이후에도 목록과 학급 선택 결과가 자연스럽게
             갱신되도록 구성했습니다.
           </p>
         </div>
@@ -1842,17 +2078,14 @@ function App() {
     <>
       <section className="hero-card">
         <div className="hero-content">
-          <p className="hero-badge">Student Dashboard</p>
-          <h1>학생 목록과 상담 기록을 한 번에 관리해요</h1>
-          <p className="hero-copy">
-            검색, 학급 선택, 무한 스크롤 기반 목록으로 많은 학생 데이터도 빠르게
-            확인할 수 있도록 구성했습니다.
-          </p>
+          <p className="hero-badge">{studentWorkspaceHero.badge}</p>
+          <h1>{studentWorkspaceHero.title}</h1>
+          <p className="hero-copy">{studentWorkspaceHero.description}</p>
         </div>
 
         <div className="hero-side">
           <div className="summary-chip">
-            <span>{hasActiveFilters ? '현재 검색 결과' : '전체 학생 수'}</span>
+            <span>{hasActiveFilters ? '현재 선택 조건' : '전체 학생 수'}</span>
             <strong>{isLoading ? '불러오는 중' : `${totalStudentCount}명`}</strong>
           </div>
           <div className="summary-chip is-active">
@@ -1874,15 +2107,21 @@ function App() {
                   <span className="student-discovery__title-text">학급선택</span>
                 </h2>
                 <div
-                  className="chip-row chip-row--class-picker"
+                  className={`chip-row chip-row--class-picker ${
+                    activeView === 'home' ||
+                    activeSchoolWorkModule?.id === personalGradeRecordsModule.id
+                      ? 'chip-row--personal-grade-records'
+                      : ''
+                  }`}
                   role="tablist"
                   aria-label="학급 선택"
                 >
-                  {CLASS_FILTER_OPTIONS.map((option) => (
+                  {activeClassFilterOptions.map((option) => (
                     <button
                       key={`${option.grade}-${option.classNum}`}
-                      className={`chip-button chip-button--grade-${option.grade} ${
-                        selectedGrade === option.grade && selectedClass === option.classNum
+                      className={`chip-button chip-button--grade-${option.grade || 'all'} ${
+                        activeSelectedGrade === option.grade &&
+                        activeSelectedClass === option.classNum
                           ? 'is-active'
                           : ''
                       }`}
@@ -1893,6 +2132,18 @@ function App() {
                     </button>
                   ))}
                 </div>
+                {ActiveStudentWorkspaceHeaderActions ? (
+                  <div className="student-discovery__module-actions">
+                    <ActiveStudentWorkspaceHeaderActions
+                      selectedClass={activeSelectedClass}
+                      selectedGrade={activeSelectedGrade}
+                      selectedStudent={activeWorkspaceSelectedStudent}
+                      onImportComplete={() =>
+                        refreshSchoolWorkModuleData(activeSchoolWorkModule?.id)
+                      }
+                    />
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -1901,12 +2152,12 @@ function App() {
 
       <div
         className={`workspace ${
-          isCounselingView ? 'workspace--counseling' : 'workspace--home'
+          isStudentDetailWorkspaceView ? 'workspace--counseling' : 'workspace--home'
         }`}
       >
         <div className="main-column">
           {isLoading && !hasVisibleStudents ? (
-            isCounselingView ? (
+            isStudentDetailWorkspaceView ? (
               <section className="list-card">
                 <div className="card-header card-header--student-list">
                   <div>
@@ -1955,12 +2206,12 @@ function App() {
             <section className="empty-card">
               <div className="empty-icon">0</div>
               <h2>조건에 맞는 학생이 없습니다</h2>
-              <p>검색어를 조금 다르게 입력하거나 학급 선택을 다시 확인해 보세요.</p>
+              <p>학급 선택을 다시 확인해 보세요.</p>
             </section>
           ) : null}
 
           {hasVisibleStudents ? (
-            isCounselingView ? (
+            isStudentDetailWorkspaceView ? (
               studentListSection
             ) : (
               <div className="home-overview-grid">
@@ -1971,110 +2222,173 @@ function App() {
           ) : null}
         </div>
 
-        {isCounselingView ? (
+        {isStudentDetailWorkspaceView ? (
           <aside className="detail-column" ref={detailColumnRef}>
             <section className="detail-card">
-              {!selectedStudent ? (
+              {!activeWorkspaceSelectedStudent ? (
                 <div className="detail-placeholder">
-                  <div className="empty-icon">상</div>
-                  <h2>학생을 선택하면 학생 상담 폼이 열립니다</h2>
+                  <div className="empty-icon">
+                    {isCounselingView
+                      ? '상'
+                      : activeSchoolWorkModule?.studentWorkspace?.emptyState?.icon ?? '업'}
+                  </div>
+                  <h2>
+                    {isCounselingView
+                      ? '학생을 선택하면 학생 상담 폼이 열립니다'
+                      : activeSchoolWorkModule?.studentWorkspace?.emptyState?.title}
+                  </h2>
                   <p>
-                    왼쪽 학생 카드를 클릭하면 해당 학생의 상담 입력 폼과 과거 상담
-                    내역이 이 영역에 함께 표시됩니다.
+                    {isCounselingView
+                      ? '왼쪽 학생 카드를 클릭하면 해당 학생의 상담 입력 폼과 과거 상담 내역이 이 영역에 함께 표시됩니다.'
+                      : activeSchoolWorkModule?.studentWorkspace?.emptyState?.description}
                   </p>
+                  {!isCounselingView && ActiveStudentWorkspacePlaceholderDetails ? (
+                    <ActiveStudentWorkspacePlaceholderDetails
+                      dataRefreshKey={activeSchoolWorkDataRefreshKey}
+                      selectedClass={activeSelectedClass}
+                      selectedGrade={activeSelectedGrade}
+                    />
+                  ) : null}
                 </div>
               ) : (
                 <>
                   <div className="detail-header">
                     <div className="detail-profile">
-                      <button
-                        className="detail-profile__avatar-button"
-                        type="button"
-                        onClick={openAvatarFilePicker}
-                        disabled={isUploadingAvatar}
-                        aria-label={`${selectedStudent.name} 학생 프로필 사진 업로드`}
-                      >
-                        <div className="detail-profile__avatar">
-                          {getDisplayedStudentAvatarSrc(selectedStudent) ? (
-                            <img
-                              src={getDisplayedStudentAvatarSrc(selectedStudent)}
-                              alt={`${selectedStudent.name} 프로필`}
-                              className="detail-profile__avatar-image"
-                              onError={() => setAvatarLoadFailed(selectedStudent.id, true)}
-                            />
-                          ) : (
-                            <span
-                              className="detail-profile__fallback"
-                              style={{
-                                backgroundColor: getStudentAvatarTheme(selectedStudent).background,
-                                color: getStudentAvatarTheme(selectedStudent).color,
-                              }}
-                            >
-                              {getStudentInitial(selectedStudent)}
-                            </span>
-                          )}
+                      {isCounselingView ? (
+                        <button
+                          className="detail-profile__avatar-button"
+                          type="button"
+                          onClick={openAvatarFilePicker}
+                          disabled={isUploadingAvatar}
+                          aria-label={`${activeWorkspaceSelectedStudent.name} 학생 프로필 사진 업로드`}
+                        >
+                          <div className="detail-profile__avatar">
+                            {getDisplayedStudentAvatarSrc(activeWorkspaceSelectedStudent) ? (
+                              <img
+                                src={getDisplayedStudentAvatarSrc(activeWorkspaceSelectedStudent)}
+                                alt={`${activeWorkspaceSelectedStudent.name} 프로필`}
+                                className="detail-profile__avatar-image"
+                                onError={() =>
+                                  setAvatarLoadFailed(activeWorkspaceSelectedStudent.id, true)
+                                }
+                              />
+                            ) : (
+                              <span
+                                className="detail-profile__fallback"
+                                style={{
+                                  backgroundColor: getStudentAvatarTheme(activeWorkspaceSelectedStudent).background,
+                                  color: getStudentAvatarTheme(activeWorkspaceSelectedStudent).color,
+                                }}
+                              >
+                                {getStudentInitial(activeWorkspaceSelectedStudent)}
+                              </span>
+                            )}
 
-                          {isUploadingAvatar ? (
-                            <span className="detail-profile__overlay" aria-hidden="true">
-                              <span className="avatar-spinner" />
-                            </span>
-                          ) : null}
+                            {isUploadingAvatar ? (
+                              <span className="detail-profile__overlay" aria-hidden="true">
+                                <span className="avatar-spinner" />
+                              </span>
+                            ) : null}
+                          </div>
+                        </button>
+                      ) : (
+                        <div className="detail-profile__avatar-button detail-profile__avatar-button--static">
+                          <div className="detail-profile__avatar">
+                            {getDisplayedStudentAvatarSrc(activeWorkspaceSelectedStudent) ? (
+                              <img
+                                src={getDisplayedStudentAvatarSrc(activeWorkspaceSelectedStudent)}
+                                alt={`${activeWorkspaceSelectedStudent.name} 프로필`}
+                                className="detail-profile__avatar-image"
+                              />
+                            ) : (
+                              <span
+                                className="detail-profile__fallback"
+                                style={{
+                                  backgroundColor: getStudentAvatarTheme(activeWorkspaceSelectedStudent).background,
+                                  color: getStudentAvatarTheme(activeWorkspaceSelectedStudent).color,
+                                }}
+                              >
+                                {getStudentInitial(activeWorkspaceSelectedStudent)}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </button>
+                      )}
 
-                      <input
-                        ref={avatarFileInputRef}
-                        className="visually-hidden"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleStudentAvatarChange}
-                      />
+                      {isCounselingView ? (
+                        <input
+                          ref={avatarFileInputRef}
+                          className="visually-hidden"
+                          type="file"
+                          accept="image/*"
+                          onChange={handleStudentAvatarChange}
+                        />
+                      ) : null}
 
                       <div className="detail-profile__copy">
                         <h2>
-                          {selectedStudent.grade}학년 {selectedStudent.class_num}반{' '}
-                          {selectedStudent.student_num}번 {selectedStudent.name}
+                          {activeWorkspaceSelectedStudent.grade}학년{' '}
+                          {activeWorkspaceSelectedStudent.class_num}반{' '}
+                          {activeWorkspaceSelectedStudent.student_num}번{' '}
+                          {activeWorkspaceSelectedStudent.name}
                         </h2>
                       </div>
                     </div>
 
                     <div className="detail-profile__actions">
-                      <button
-                        className="ghost-button camera-button"
-                        type="button"
-                        onClick={openAvatarFilePicker}
-                        disabled={isUploadingAvatar}
-                      >
-                        {isUploadingAvatar ? '업로드 중...' : '📷 카메라'}
-                      </button>
-                      <button
-                        className="ghost-button"
-                        type="button"
-                        onClick={clearSelectedStudent}
-                      >
-                        선택 해제
-                      </button>
+                      {isCounselingView ? (
+                        <button
+                          className="ghost-button camera-button"
+                          type="button"
+                          onClick={openAvatarFilePicker}
+                          disabled={isUploadingAvatar}
+                        >
+                          {isUploadingAvatar ? '업로드 중...' : '📷 카메라'}
+                        </button>
+                      ) : null}
+                      {isPersonalGradeRecordsView ? (
+                        schoolWorkHeaderActions
+                      ) : (
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={clearActiveWorkspaceSelectedStudent}
+                        >
+                          선택 해제
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  <section className="detail-section">
-                    <div className="section-row">
-                      <div />
-                    </div>
+                  {isCounselingView ? (
+                    <section className="detail-section">
+                      <div className="section-row">
+                        <div />
+                      </div>
 
-                    <p className="detail-note">
-                      새 상담을 저장하면 같은 화면 아래의 과거 상담 기록 목록이
-                      자동으로 갱신됩니다.
-                    </p>
+                      <p className="detail-note">
+                        새 상담을 저장하면 같은 화면 아래의 과거 상담 기록 목록이
+                        자동으로 갱신됩니다.
+                      </p>
 
-                    <CounselingForm
-                      key={`${selectedStudent.id}-${counselingRefreshKey}`}
-                      studentId={selectedStudent.id}
-                      studentName={selectedStudent.name}
-                      expandedRecordId={expandedCounselingRecordId}
-                      onSaveSuccess={handleCounselingSaveSuccess}
+                      <CounselingForm
+                        key={`${activeWorkspaceSelectedStudent.id}-${counselingRefreshKey}`}
+                        studentId={activeWorkspaceSelectedStudent.id}
+                        studentName={activeWorkspaceSelectedStudent.name}
+                        expandedRecordId={expandedCounselingRecordId}
+                        onSaveSuccess={handleCounselingSaveSuccess}
+                      />
+                    </section>
+                  ) : ActiveSchoolWorkModule ? (
+                    <ActiveSchoolWorkModule
+                      dataRefreshKey={activeSchoolWorkDataRefreshKey}
+                      onHeaderActionsChange={setSchoolWorkHeaderActions}
+                      onToast={showToast}
+                      selectedClass={activeSelectedClass}
+                      selectedGrade={activeSelectedGrade}
+                      selectedStudent={activeWorkspaceSelectedStudent}
                     />
-                  </section>
+                  ) : null}
                 </>
               )}
             </section>
@@ -2096,8 +2410,16 @@ function App() {
     </div>
   )
 
+  const toast = toastMessage ? (
+    <div className={`toast toast--${toastTone}`} role="status" aria-live="polite">
+      <strong>{toastTone === 'error' ? '처리 실패' : '저장 완료'}</strong>
+      <p>{toastMessage}</p>
+    </div>
+  ) : null
+
   return (
     <main className="page" ref={pageRef}>
+      {toast}
       <section className="app-header" ref={appHeaderRef}>
         <div className="app-header__identity">
           <span className="school-logo" aria-hidden="true">
@@ -2242,9 +2564,7 @@ function App() {
             >
               <button
                 className={`app-header__nav-button app-header__nav-button--dropdown ${
-                  isSchoolWorkMenuOpen ||
-                  activeView === 'emergency-contacts' ||
-                  activeView === 'personal-grade-records'
+                  isSchoolWorkMenuOpen || ActiveSchoolWorkModule
                     ? 'is-active'
                     : ''
                 }`}
@@ -2269,41 +2589,26 @@ function App() {
                 aria-label="학교업무 메뉴"
               >
                 <div className="app-header__mega-menu-grid app-header__mega-menu-grid--single">
-                  <button
-                    className="app-header__mega-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      closeSchoolWorkMenu()
-                      handleOpenEmergencyContactsView()
-                    }}
-                  >
-                    <span className="app-header__mega-item-icon" aria-hidden="true">
-                      ☎
-                    </span>
-                    <span className="app-header__mega-item-copy">
-                      <strong>비상연락망</strong>
-                      <span>학급별 연락처 확인과 출력</span>
-                    </span>
-                  </button>
-
-                  <button
-                    className="app-header__mega-item"
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      closeSchoolWorkMenu()
-                      handleOpenPersonalGradeRecordsView()
-                    }}
-                  >
-                    <span className="app-header__mega-item-icon" aria-hidden="true">
-                      표
-                    </span>
-                    <span className="app-header__mega-item-copy">
-                      <strong>개인내신성적관리부</strong>
-                      <span>개인별 내신 성적 자료 관리</span>
-                    </span>
-                  </button>
+                  {SCHOOL_WORK_MODULES.map((module) => (
+                    <button
+                      className="app-header__mega-item"
+                      key={module.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        closeSchoolWorkMenu()
+                        handleOpenSchoolWorkModule(module.id)
+                      }}
+                    >
+                      <span className="app-header__mega-item-icon" aria-hidden="true">
+                        {module.menu.icon}
+                      </span>
+                      <span className="app-header__mega-item-copy">
+                        <strong>{module.menu.title}</strong>
+                        <span>{module.menu.description}</span>
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -2311,22 +2616,6 @@ function App() {
         </div>
 
         <div className="app-header__actions">
-          <div className="app-header__search">
-            <label className="app-header__search-field">
-              <span className="visually-hidden">학생 검색</span>
-              <input
-                className="app-header__search-input"
-                type="search"
-                value={searchTerm}
-                onChange={handleSearchTermChange}
-                placeholder="학생 이름 또는 학번 검색"
-                autoComplete="off"
-                aria-invalid={Boolean(errorMessage)}
-                title={errorMessage || statusMessage}
-              />
-            </label>
-          </div>
-
           <div className="profile-chip">
             <div className="profile-chip__avatar" aria-hidden="true">
               {getUserAvatarUrl(authUser) ? (
@@ -2354,15 +2643,15 @@ function App() {
 
       {activeView === 'dashboard'
         ? <Dashboard />
-        : activeView === 'emergency-contacts'
-          ? <EmergencyContacts />
-          : activeView === 'personal-grade-records'
-            ? <PersonalGradeRecords />
-            : activeView === 'student-create'
-              ? studentCreateView
-              : activeView === 'photo-matching'
-                ? photoMatchingView
-                : studentView}
+        : isSchoolWorkStudentWorkspaceView
+          ? studentView
+          : ActiveSchoolWorkModule
+          ? <ActiveSchoolWorkModule />
+          : activeView === 'student-create'
+            ? studentCreateView
+            : activeView === 'photo-matching'
+              ? photoMatchingView
+              : studentView}
     </main>
   )
 }

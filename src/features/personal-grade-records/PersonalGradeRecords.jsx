@@ -1,356 +1,538 @@
-import schoolLogoUrl from '../../assets/dongsuyeong-school-logo.svg'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { supabase } from '../../lib/supabase'
+import {
+  downloadClassPersonalGradeRecordZip,
+  downloadCombinedClassPersonalGradeRecordHwpx,
+  downloadPersonalGradeRecordHwpx,
+} from './hwpxExporter.js'
+import {
+  PERSONAL_GRADE_RECORD_SCHOOL_YEAR,
+  hasVolunteerAward,
+  mergePersonalGradeRecordData,
+} from './personalGradeRecordsData.js'
+import { personalGradeRecordsMenu } from './personalGradeRecordsConfig.js'
+import {
+  fetchExistingPersonalGradeRecordMap,
+  getPersonalGradeRecordErrorMessage,
+} from './personalGradeRecordsRepository.js'
+import './PersonalGradeRecords.css'
 
-const SCHOOL_YEAR = '2026'
-
-function Line({ dash = false, x1, x2, y1, y2 }) {
-  return (
-    <line
-      className={dash ? 'pgr-line pgr-line--dash' : 'pgr-line'}
-      x1={x1}
-      x2={x2}
-      y1={y1}
-      y2={y2}
-    />
-  )
-}
-
-function Box({ fill = 'none', height, width, x, y }) {
-  return (
-    <rect
-      className="pgr-box"
-      fill={fill}
-      height={height}
-      width={width}
-      x={x}
-      y={y}
-    />
-  )
-}
-
-function Grid({ dash = true, xs, ys }) {
-  const x = xs[0]
-  const y = ys[0]
-  const width = xs[xs.length - 1] - x
-  const height = ys[ys.length - 1] - y
-
-  return (
-    <g>
-      <Box height={height} width={width} x={x} y={y} />
-      {xs.slice(1, -1).map((lineX) => (
-        <Line dash={dash} key={`x-${lineX}`} x1={lineX} x2={lineX} y1={y} y2={y + height} />
-      ))}
-      {ys.slice(1, -1).map((lineY) => (
-        <Line dash={dash} key={`y-${lineY}`} x1={x} x2={x + width} y1={lineY} y2={lineY} />
-      ))}
-    </g>
-  )
-}
-
-function Label({ children, x, y }) {
-  return (
-    <text className="pgr-text pgr-label" textAnchor="middle" x={x} y={y}>
-      {String(children)
-        .split('\n')
-        .map((line, index) => (
-          <tspan dy={index === 0 ? 0 : 19} key={line} x={x}>
-            {line}
-          </tspan>
-        ))}
-    </text>
-  )
-}
-
-function Txt({
-  anchor = 'middle',
-  children,
-  className = '',
-  size,
-  weight,
-  x,
-  y,
+function PersonalGradeRecords({
+  dataRefreshKey = 0,
+  onHeaderActionsChange,
+  onToast,
+  selectedClass = '',
+  selectedGrade = '',
+  selectedStudent,
 }) {
-  return (
-    <text
-      className={`pgr-text ${className}`}
-      fontSize={size}
-      fontWeight={weight}
-      textAnchor={anchor}
-      x={x}
-      y={y}
-    >
-      {children}
-    </text>
-  )
-}
+  const [recordData, setRecordData] = useState(() => mergePersonalGradeRecordData())
+  const [isLoading, setIsLoading] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [noticeMessage, setNoticeMessage] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
 
-function Multi({ anchor = 'middle', className = '', lines, size = 12, x, y }) {
-  return (
-    <text
-      className={`pgr-text ${className}`}
-      fontSize={size}
-      textAnchor={anchor}
-      x={x}
-      y={y}
-    >
-      {lines.map((line, index) => (
-        <tspan dy={index === 0 ? 0 : size + 2} key={`${line}-${index}`} x={x}>
-          {line}
-        </tspan>
-      ))}
-    </text>
-  )
-}
+  useEffect(() => {
+    let isMounted = true
 
-function PersonalGradeRecords() {
+    async function loadRecord() {
+      setRecordData(mergePersonalGradeRecordData())
+      setNoticeMessage('')
+      setErrorMessage('')
+
+      if (!selectedStudent) {
+        return
+      }
+
+      if (!supabase) {
+        setErrorMessage('Supabase 연결 정보가 없어 데이터를 불러올 수 없습니다.')
+        return
+      }
+
+      setIsLoading(true)
+
+      const { data, error } = await supabase
+        .from('personal_grade_records')
+        .select('data')
+        .eq('student_id', selectedStudent.id)
+        .eq('school_year', PERSONAL_GRADE_RECORD_SCHOOL_YEAR)
+        .maybeSingle()
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        setErrorMessage(getPersonalGradeRecordErrorMessage(error))
+        setIsLoading(false)
+        return
+      }
+
+      setRecordData(mergePersonalGradeRecordData(data?.data))
+      setIsLoading(false)
+    }
+
+    void loadRecord()
+
+    return () => {
+      isMounted = false
+    }
+  }, [dataRefreshKey, selectedStudent])
+
+  function updateStudentInfoField(field, value) {
+    setRecordData((previous) => ({
+      ...previous,
+      studentInfo: {
+        ...previous.studentInfo,
+        [field]: value,
+      },
+    }))
+  }
+
+  function updateAttendanceField(field, value) {
+    setRecordData((previous) => ({
+      ...previous,
+      attendance: {
+        ...previous.attendance,
+        [field]: value.replace(/[^\d]/g, ''),
+      },
+    }))
+  }
+
+  function updateSelfGovernmentField(field, checked) {
+    setRecordData((previous) => ({
+      ...previous,
+      selfGovernment: {
+        ...previous.selfGovernment,
+        [field]: checked,
+      },
+    }))
+  }
+
+  function updateClubField(group, field, value) {
+    setRecordData((previous) => ({
+      ...previous,
+      club: {
+        ...previous.club,
+        [group]: {
+          ...previous.club[group],
+          [field]: value,
+        },
+      },
+    }))
+  }
+
+  function updateVolunteerField(field, value) {
+    setRecordData((previous) => ({
+      ...previous,
+      volunteer: {
+        ...previous.volunteer,
+        [field]: field === 'hours' ? value.replace(/[^\d]/g, '') : value,
+      },
+    }))
+  }
+
+  async function saveRecord(nextRecordData = recordData, targetStudent = selectedStudent) {
+    if (!targetStudent || !supabase) {
+      return false
+    }
+
+    const { error } = await supabase.from('personal_grade_records').upsert(
+      {
+        student_id: targetStudent.id,
+        school_year: PERSONAL_GRADE_RECORD_SCHOOL_YEAR,
+        data: mergePersonalGradeRecordData(nextRecordData),
+      },
+      {
+        onConflict: 'student_id,school_year',
+      },
+    )
+
+    if (error) {
+      throw error
+    }
+
+    return true
+  }
+
+  async function handleSaveClick() {
+    if (!selectedStudent) {
+      return
+    }
+
+    setIsSaving(true)
+    setNoticeMessage('')
+    setErrorMessage('')
+
+    try {
+      await saveRecord()
+      onToast?.(`${selectedStudent.name} 학생의 개인내신성적관리부 데이터를 저장했습니다.`)
+    } catch (error) {
+      onToast?.(getPersonalGradeRecordErrorMessage(error), 'error')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handlePersonalHwpxDownload = useCallback(async () => {
+    if (!selectedStudent) {
+      return
+    }
+
+    setIsExporting(true)
+    setNoticeMessage('')
+    setErrorMessage('')
+
+    try {
+      await downloadPersonalGradeRecordHwpx(selectedStudent, recordData)
+      setNoticeMessage('선택 학생의 HWPX 파일을 생성했습니다.')
+    } catch (error) {
+      setErrorMessage(error.message)
+    } finally {
+      setIsExporting(false)
+    }
+  }, [recordData, selectedStudent])
+
+  const loadClassExportRows = useCallback(async () => {
+    if (!supabase) {
+      throw new Error('Supabase 연결 정보가 없어 파일을 생성할 수 없습니다.')
+    }
+
+    const exportGrade = selectedGrade || selectedStudent?.grade || '1'
+    const exportClass = selectedClass || ''
+    let studentQuery = supabase
+      .from('students')
+      .select('id, name, grade, class_num, student_num')
+      .eq('grade', Number(exportGrade))
+      .order('class_num', { ascending: true })
+      .order('student_num', { ascending: true })
+
+    if (exportClass) {
+      studentQuery = studentQuery.eq('class_num', Number(exportClass))
+    }
+
+    const { data: students, error: studentsError } = await studentQuery
+
+    if (studentsError) {
+      throw studentsError
+    }
+
+    if (!students?.length) {
+      return {
+        exportClass,
+        exportGrade,
+        studentsWithRecords: [],
+      }
+    }
+
+    const existingRecordMap = await fetchExistingPersonalGradeRecordMap(
+      students.map((student) => student.id),
+    )
+
+    return {
+      exportClass,
+      exportGrade,
+      studentsWithRecords: students.map((student) => ({
+        student,
+        recordData: mergePersonalGradeRecordData(existingRecordMap.get(student.id)),
+      })),
+    }
+  }, [selectedClass, selectedGrade, selectedStudent])
+
+  const handleCombinedClassHwpxDownload = useCallback(async () => {
+    setIsExporting(true)
+    setNoticeMessage('')
+    setErrorMessage('')
+
+    try {
+      const { exportClass, exportGrade, studentsWithRecords } = await loadClassExportRows()
+
+      if (!studentsWithRecords.length) {
+        setErrorMessage('출력할 학생이 없습니다.')
+        return
+      }
+
+      const fileName = `${PERSONAL_GRADE_RECORD_SCHOOL_YEAR}_${exportGrade}-${
+        exportClass || '전체'
+      }_개인내신성적관리부_학급모두.hwpx`
+
+      await downloadCombinedClassPersonalGradeRecordHwpx(studentsWithRecords, fileName)
+
+      setNoticeMessage(
+        `${studentsWithRecords.length}명의 HWPX 페이지를 한 파일로 생성했습니다.`,
+      )
+    } catch (error) {
+      setErrorMessage(getPersonalGradeRecordErrorMessage(error))
+    } finally {
+      setIsExporting(false)
+    }
+  }, [loadClassExportRows])
+
+  const handleClassZipDownload = useCallback(async () => {
+    setIsExporting(true)
+    setNoticeMessage('')
+    setErrorMessage('')
+
+    try {
+      const { exportClass, exportGrade, studentsWithRecords } = await loadClassExportRows()
+
+      if (!studentsWithRecords.length) {
+        setErrorMessage('출력할 학생이 없습니다.')
+        return
+      }
+
+      const zipName = `${PERSONAL_GRADE_RECORD_SCHOOL_YEAR}_${exportGrade}-${
+        exportClass || '전체'
+      }_개인내신성적관리부.zip`
+
+      await downloadClassPersonalGradeRecordZip(studentsWithRecords, zipName)
+
+      setNoticeMessage(`${studentsWithRecords.length}명의 HWPX 파일을 ZIP으로 생성했습니다.`)
+    } catch (error) {
+      setErrorMessage(getPersonalGradeRecordErrorMessage(error))
+    } finally {
+      setIsExporting(false)
+    }
+  }, [loadClassExportRows])
+
+  const isBusy = isLoading || isSaving || isExporting
+  const headerActions = useMemo(
+    () => (
+      <>
+        <button
+          className="ghost-button personal-grade-records-export-button personal-grade-records-export-button--student"
+          type="button"
+          onClick={handlePersonalHwpxDownload}
+          disabled={!selectedStudent || isBusy}
+        >
+          개인저장
+        </button>
+        <button
+          className="ghost-button personal-grade-records-export-button personal-grade-records-export-button--combined"
+          type="button"
+          onClick={handleCombinedClassHwpxDownload}
+          disabled={isBusy}
+        >
+          전체저장
+        </button>
+        <button
+          className="ghost-button personal-grade-records-export-button personal-grade-records-export-button--class"
+          type="button"
+          onClick={handleClassZipDownload}
+          disabled={isBusy}
+        >
+          전체저장(개별)
+        </button>
+      </>
+    ),
+    [
+      handleClassZipDownload,
+      handleCombinedClassHwpxDownload,
+      handlePersonalHwpxDownload,
+      isBusy,
+      selectedStudent,
+    ],
+  )
+
+  useEffect(() => {
+    onHeaderActionsChange?.(headerActions)
+
+    return () => {
+      onHeaderActionsChange?.(null)
+    }
+  }, [headerActions, onHeaderActionsChange])
+
   return (
-    <section className="personal-grade-records-shell">
-      <div className="dashboard-header-card personal-grade-records-toolbar">
+    <section className="detail-section personal-grade-records-shell">
+      <div className="section-row personal-grade-records-toolbar">
         <div>
-          <p className="section-label">학교업무</p>
-          <h1>개인내신성적관리부</h1>
+          <h1>{personalGradeRecordsMenu.title}</h1>
+        </div>
+        <div className="personal-grade-records-actions">
+          <fieldset className="personal-grade-records-gender-field">
+            <legend>성별</legend>
+            <div className="personal-grade-records-gender-toggle">
+              {['남', '여'].map((gender) => (
+                <button
+                  className={`personal-grade-records-gender-button ${
+                    recordData.studentInfo.gender === gender ? 'is-active' : ''
+                  }`}
+                  key={gender}
+                  type="button"
+                  onClick={() => updateStudentInfoField('gender', gender)}
+                  disabled={!selectedStudent || isBusy}
+                  aria-pressed={recordData.studentInfo.gender === gender}
+                >
+                  {gender}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={handleSaveClick}
+            disabled={!selectedStudent || isBusy}
+          >
+            {isSaving ? '변경사항 저장 중...' : '변경사항 저장'}
+          </button>
         </div>
       </div>
 
-      <section
-        className="personal-grade-records-preview"
-        aria-label="개인내신성적관리부 양식 미리보기"
-      >
-        <article className="personal-grade-records-paper">
-          <svg
-            className="personal-grade-records-svg"
-            role="img"
-            viewBox="0 0 1024 768"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <title>2026학년도 개인 내신성적 관리부 양식</title>
-            <rect fill="#ffffff" height="768" width="1024" />
+      {noticeMessage ? (
+        <p className="personal-grade-records-message">{noticeMessage}</p>
+      ) : null}
+      {errorMessage ? (
+        <p className="personal-grade-records-message personal-grade-records-message--error">
+          {errorMessage}
+        </p>
+      ) : null}
 
-            <g>
-              <Box height={86} width={234} x={144} y={38} />
-              <Line x1={144} x2={378} y1={60} y2={60} />
-              <Line x1={144} x2={378} y1={84} y2={84} />
-              <Line x1={144} x2={378} y1={104} y2={104} />
-              <Line x1={184} x2={184} y1={84} y2={124} />
-              <Line x1={226} x2={226} y1={84} y2={124} />
-              <Line x1={264} x2={264} y1={84} y2={124} />
-              <Txt className="pgr-school-name" size={16} x={261} y={54}>
-                동 수 영 중 학 교
-              </Txt>
-              <Txt size={14} x={261} y={77}>
-                ( <tspan className="pgr-school-year">{SCHOOL_YEAR}</tspan> )학년도 입학(전입)
-              </Txt>
-              <Txt size={13} x={164} y={104}>성별</Txt>
-              <Txt size={13} x={205} y={97}>남</Txt>
-              <Txt size={13} x={245} y={104}>성명</Txt>
-              <Txt size={13} x={205} y={118}>여</Txt>
-            </g>
-
-            <g>
-              <Box fill="#d9ffd2" height={36} width={244} x={399} y={42} />
-              <Txt className="pgr-title" size={25} weight={900} x={521} y={68}>
-                개인 내신성적 관리부
-              </Txt>
-              <image height={46} href={schoolLogoUrl} preserveAspectRatio="xMidYMid meet" width={185} x={457} y={84} />
-            </g>
-
-            <g>
-              <Grid dash={false} xs={[665, 701, 736, 771, 821, 891, 977]} ys={[38, 61, 82, 103, 124]} />
-              <Txt size={12} x={683} y={55}>학년</Txt>
-              <Txt size={12} x={718} y={55}>반</Txt>
-              <Txt size={12} x={753} y={55}>번호</Txt>
-              <Txt size={12} x={796} y={55}>학생이름</Txt>
-              <Txt size={12} x={856} y={55}>학생확인</Txt>
-              <Txt size={12} x={934} y={55}>담임교사</Txt>
-              {[1, 2, 3].map((grade, index) => (
-                <g key={grade}>
-                  <Txt size={13} x={683} y={76 + index * 21}>{grade}</Txt>
-                  <Txt size={12} x={960} y={76 + index * 21}>(인)</Txt>
-                </g>
-              ))}
-            </g>
-
-            <g>
-              <Box fill="#eeeeee" height={151} width={52} x={144} y={132} />
-              <Label x={170} y={196}>출결{'\n'}상황</Label>
-              <Grid xs={[196, 232, 287, 342, 397, 452, 516, 594, 664]} ys={[132, 155, 188, 220, 252, 283]} />
-              <Line x1={232} x2={452} y1={155} y2={155} />
-              <Box height={151} width={313} x={664} y={132} />
-              <Line x1={664} x2={977} y1={188} y2={188} />
-              <Txt size={12} x={214} y={177}>학년</Txt>
-              <Txt size={13} x={342} y={148}>출결상황</Txt>
-              <Multi lines={['미인정', '결석']} size={12} x={260} y={171} />
-              <Multi lines={['미인정', '지각']} size={12} x={315} y={171} />
-              <Multi lines={['미인정', '조퇴']} size={12} x={370} y={171} />
-              <Multi lines={['미인정', '결과']} size={12} x={425} y={171} />
-              <Multi lines={['미인정결석', '학년별합계']} size={12} x={484} y={163} />
-              <Multi lines={['마감', '기준']} size={12} x={555} y={163} />
-              <Multi lines={['미인정결석', '3년 총합계']} size={12} x={629} y={163} />
-              {[1, 2, 3].map((grade, index) => (
-                <g key={`attendance-${grade}`}>
-                  <Txt size={14} x={214} y={210 + index * 32}>{grade}</Txt>
-                  <Txt size={13} x={508} y={210 + index * 32}>일</Txt>
-                </g>
-              ))}
-              <Txt className="pgr-blue" size={12} x={555} y={210}>학년종료일</Txt>
-              <Txt className="pgr-blue" size={12} x={555} y={242}>학년종료일</Txt>
-              <Multi className="pgr-blue" lines={['내신성적', '산출일']} size={12} x={555} y={268} />
-              <Txt size={14} x={629} y={238}>점</Txt>
-              <Multi
-                anchor="start"
-                className="pgr-note-text"
-                lines={[
-                  '※출결상황 점수는 부산시 고입지침을 따름.',
-                  '미인정 지각, 미인정 조퇴, 미인정 결과는 그 횟수를 합산',
-                  '하여 3회를 미인정 결석 1일로 계산(2회 이하는 버림)',
-                ]}
-                size={12}
-                x={670}
-                y={146}
+      <div className="personal-grade-records-card-grid">
+        <section className="personal-grade-records-card">
+          <div className="personal-grade-records-card__header">
+            <span className="personal-grade-records-card__number">1</span>
+            <h2>출결상황</h2>
+          </div>
+          <div className="personal-grade-records-mini-grid personal-grade-records-mini-grid--attendance">
+            <label className="personal-grade-records-mini-card">
+              <strong>미인정 결석</strong>
+              <input
+                value={recordData.attendance.unexcusedAbsence}
+                onChange={(event) => updateAttendanceField('unexcusedAbsence', event.target.value)}
+                inputMode="numeric"
+                placeholder="0"
               />
-              <Grid dash={false} xs={[664, 743, 820, 899, 977]} ys={[188, 207, 226, 245, 264, 283]} />
-              <Txt size={12} x={704} y={202}>미인정결석일</Txt>
-              <Txt size={12} x={781} y={202}>부여점수</Txt>
-              <Txt size={12} x={860} y={202}>미인정결석일</Txt>
-              <Txt size={12} x={938} y={202}>부여점수</Txt>
-              {[
-                ['0일', '21점', '9 ~ 10일', '16점'],
-                ['1 ~ 2일', '20점', '11 ~ 12일', '15점'],
-                ['3 ~ 4일', '19점', '13 ~ 14일', '14점'],
-                ['5 ~ 6일', '18점', '15 ~ 16일', '13점'],
-              ].map((row, index) => row.map((value, colIndex) => (
-                <Txt key={`${value}-${index}-${colIndex}`} size={12} x={[704, 781, 860, 938][colIndex]} y={221 + index * 19}>
-                  {value}
-                </Txt>
-              )))}
-              <Txt size={12} x={704} y={279}>7 ~ 8일</Txt>
-              <Txt size={12} x={781} y={279}>17점</Txt>
-              <Txt size={12} x={860} y={279}>17일 이상</Txt>
-              <Txt size={12} x={938} y={279}>12점</Txt>
-            </g>
+            </label>
+            <label className="personal-grade-records-mini-card">
+              <strong>미인정 지각</strong>
+              <input
+                value={recordData.attendance.unexcusedTardy}
+                onChange={(event) => updateAttendanceField('unexcusedTardy', event.target.value)}
+                inputMode="numeric"
+                placeholder="0"
+              />
+            </label>
+            <label className="personal-grade-records-mini-card">
+              <strong>미인정 조퇴</strong>
+              <input
+                value={recordData.attendance.unexcusedEarlyLeave}
+                onChange={(event) => updateAttendanceField('unexcusedEarlyLeave', event.target.value)}
+                inputMode="numeric"
+                placeholder="0"
+              />
+            </label>
+            <label className="personal-grade-records-mini-card">
+              <strong>미인정 결과</strong>
+              <input
+                value={recordData.attendance.unexcusedResult}
+                onChange={(event) => updateAttendanceField('unexcusedResult', event.target.value)}
+                inputMode="numeric"
+                placeholder="0"
+              />
+            </label>
+          </div>
+        </section>
 
-            <g>
-              <Box fill="#eeeeee" height={146} width={52} x={144} y={289} />
-              <Label x={170} y={354}>자율{'\n'}활동</Label>
-              <Grid xs={[196, 232, 287, 342, 397, 452, 664]} ys={[289, 341, 372, 403, 435]} />
-              <Box height={146} width={313} x={664} y={289} />
-              <Line x1={664} x2={977} y1={341} y2={341} />
-              <Txt size={13} x={214} y={322}>학년</Txt>
-              <Txt size={13} x={260} y={322}>기본점수</Txt>
-              <Txt size={13} x={315} y={322}>가점</Txt>
-              <Txt size={13} x={370} y={322}>감점</Txt>
-              <Txt size={13} x={425} y={322}>합계</Txt>
-              <Txt size={13} x={558} y={322}>비고(가점·감점 사유)</Txt>
-              <Txt size={14} x={214} y={361}>1</Txt>
-              <Txt size={14} x={260} y={361}>3</Txt>
-              <Txt size={14} x={315} y={361}>·</Txt>
-              <Txt size={14} x={370} y={361}>·</Txt>
-              <Txt size={14} x={425} y={361}>3</Txt>
-              <Txt size={14} x={214} y={392}>2</Txt>
-              <Txt size={14} x={214} y={424}>3</Txt>
-              <Multi
-                anchor="start"
-                className="pgr-note-text"
-                lines={[
-                  '※창체활동 가감점은 학교규정을 따름.',
-                  '가점과 가산점은 학년별 최대 1점까지 인정함.',
-                  '심의사항: 중도면직, 전입, 전출, 태만, 행정소송 등의 경우',
-                ]}
-                size={12}
-                x={670}
-                y={303}
+        <section className="personal-grade-records-card">
+          <div className="personal-grade-records-card__header">
+            <span className="personal-grade-records-card__number">2</span>
+            <h2>자율자치활동</h2>
+          </div>
+          <div className="personal-grade-records-mini-grid">
+            <label className="personal-grade-records-mini-card personal-grade-records-mini-card--check">
+              <input
+                type="checkbox"
+                checked={recordData.selfGovernment.classPresident}
+                onChange={(event) => updateSelfGovernmentField('classPresident', event.target.checked)}
               />
-              <Grid dash={false} xs={[664, 716, 820, 872, 977]} ys={[341, 357, 372, 388, 404, 420, 435]} />
-              <Multi lines={['가점', '1점']} size={12} x={690} y={369} />
-              <Multi lines={['감점', '1점']} size={12} x={846} y={369} />
-              <Multi lines={['학생회장·부회장', '학급반장·부반장', '선도위원', '방송위원', '학급활동우수자(심의)', '기타(분리도우미 등)']} size={11} x={768} y={354} />
-              <Multi lines={['학교폭력 처분', '학교징계 처분', '성적부정행위', '(심의에 따름)', '벌점 20점이상', '기타(심의사항)']} size={11} x={924} y={354} />
-            </g>
+              <strong>학급임원(반장)</strong>
+            </label>
+            <label className="personal-grade-records-mini-card personal-grade-records-mini-card--check">
+              <input
+                type="checkbox"
+                checked={recordData.selfGovernment.vicePresident}
+                onChange={(event) => updateSelfGovernmentField('vicePresident', event.target.checked)}
+              />
+              <strong>학급임원(부반장)</strong>
+            </label>
+            <label className="personal-grade-records-mini-card personal-grade-records-mini-card--check">
+              <input
+                type="checkbox"
+                checked={recordData.selfGovernment.guidanceDisciplinaryAction}
+                onChange={(event) =>
+                  updateSelfGovernmentField('guidanceDisciplinaryAction', event.target.checked)
+                }
+              />
+              <strong>선도처분</strong>
+            </label>
+            <label className="personal-grade-records-mini-card personal-grade-records-mini-card--check">
+              <input
+                type="checkbox"
+                checked={recordData.selfGovernment.schoolViolenceDisciplinaryAction}
+                onChange={(event) =>
+                  updateSelfGovernmentField(
+                    'schoolViolenceDisciplinaryAction',
+                    event.target.checked,
+                  )
+                }
+              />
+              <strong>학폭처분</strong>
+            </label>
+          </div>
+        </section>
 
-            <g>
-              <Box fill="#eeeeee" height={128} width={52} x={144} y={439} />
-              <Label x={170} y={497}>동아리{'\n'}활동</Label>
-              <Grid xs={[196, 232, 342, 397, 452, 507, 562, 664]} ys={[439, 484, 512, 540, 567]} />
-              <Box height={128} width={313} x={664} y={439} />
-              <Txt size={13} x={214} y={467}>학년</Txt>
-              <Txt size={13} x={287} y={467}>부서명</Txt>
-              <Txt size={13} x={370} y={467}>기본점수</Txt>
-              <Txt size={13} x={425} y={467}>가점</Txt>
-              <Txt size={13} x={480} y={467}>감점</Txt>
-              <Txt size={13} x={535} y={467}>합계</Txt>
-              <Txt size={13} x={613} y={467}>비고(가감점 사유)</Txt>
-              <Txt size={14} x={214} y={502}>1</Txt>
-              <Txt size={14} x={370} y={502}>3</Txt>
-              <Txt size={14} x={425} y={502}>·</Txt>
-              <Txt size={14} x={480} y={502}>·</Txt>
-              <Txt size={14} x={535} y={502}>3</Txt>
-              <Txt size={14} x={214} y={530}>2</Txt>
-              <Txt size={14} x={214} y={558}>3</Txt>
-              <Multi
-                anchor="start"
-                className="pgr-note-text"
-                lines={[
-                  '※창체활동 가감점은 학교규정을 따름.',
-                  '가점과 감점은 학년별 최대 1점까지 인정함.',
-                  '심의사항: 전입, 전출, 동아리 활동 기여자, 태만 등의 경우',
-                ]}
-                size={12}
-                x={670}
-                y={455}
+        <section className="personal-grade-records-card">
+          <div className="personal-grade-records-card__header">
+            <span className="personal-grade-records-card__number">3</span>
+            <h2>동아리활동</h2>
+          </div>
+          <div className="personal-grade-records-mini-grid">
+            <label className="personal-grade-records-mini-card">
+              <strong>동아리활동</strong>
+              <input
+                value={recordData.club.clubActivity.name}
+                onChange={(event) => updateClubField('clubActivity', 'name', event.target.value)}
+                placeholder="부서명"
               />
-            </g>
+            </label>
+            <label className="personal-grade-records-mini-card">
+              <strong>자율동아리</strong>
+              <input
+                value={recordData.club.autonomousClub.name}
+                onChange={(event) => updateClubField('autonomousClub', 'name', event.target.value)}
+                placeholder="부서명"
+              />
+            </label>
+          </div>
+        </section>
 
-            <g>
-              <Box fill="#eeeeee" height={163} width={52} x={144} y={572} />
-              <Label x={170} y={638}>봉사{'\n'}활동</Label>
-              <Grid xs={[196, 232, 342, 397, 452, 507, 562, 664]} ys={[572, 620, 658, 696, 735]} />
-              <Box height={163} width={313} x={664} y={572} />
-              <Txt size={13} x={214} y={603}>학년</Txt>
-              <Txt size={13} x={287} y={603}>봉사시간(누계)</Txt>
-              <Txt size={13} x={370} y={603}>기본점수</Txt>
-              <Txt size={13} x={425} y={603}>가점</Txt>
-              <Txt size={13} x={480} y={603}>감점</Txt>
-              <Txt size={13} x={535} y={603}>합계</Txt>
-              <Txt size={13} x={613} y={603}>비고(가감점 사유)</Txt>
-              <Txt size={14} x={214} y={641}>1</Txt>
-              <Txt size={14} x={370} y={641}>3</Txt>
-              <Txt size={14} x={425} y={641}>·</Txt>
-              <Line dash x1={452} x2={507} y1={658} y2={620} />
-              <Txt size={14} x={535} y={641}>3</Txt>
-              <Txt size={14} x={214} y={679}>2</Txt>
-              <Line dash x1={452} x2={507} y1={696} y2={658} />
-              <Txt size={14} x={214} y={718}>3</Txt>
-              <Line dash x1={452} x2={507} y1={735} y2={696} />
-              <Multi
-                anchor="start"
-                className="pgr-note-text"
-                lines={[
-                  '※창체활동 가감점은 학교규정을 따름.',
-                  '가점은 학년별 최대 1점까지 인정함. 심의사항: 타지역전입',
-                ]}
-                size={12}
-                x={670}
-                y={589}
+        <section className="personal-grade-records-card">
+          <div className="personal-grade-records-card__header">
+            <span className="personal-grade-records-card__number">4</span>
+            <h2>봉사활동</h2>
+          </div>
+          <div className="personal-grade-records-mini-grid">
+            <label className="personal-grade-records-mini-card">
+              <strong>봉사시간</strong>
+              <input
+                value={recordData.volunteer.hours}
+                onChange={(event) => updateVolunteerField('hours', event.target.value)}
+                inputMode="numeric"
+                placeholder="시간"
               />
-              <Txt className="pgr-red" size={13} x={746} y={638}>부산시 봉사활동 점수 기준</Txt>
-              <Grid dash={false} xs={[674, 721, 831]} ys={[650, 669, 688, 707]} />
-              <Txt size={12} x={698} y={664}>4점</Txt>
-              <Txt size={12} x={776} y={664}>연간 20시간 이상</Txt>
-              <Txt size={12} x={698} y={683}>3점</Txt>
-              <Txt size={12} x={776} y={683}>연간 10시간 이상</Txt>
-              <Txt size={12} x={698} y={702}>2점</Txt>
-              <Txt size={12} x={776} y={702}>연간 10시간 미만</Txt>
-              <Multi
-                anchor="start"
-                className="pgr-note-text"
-                lines={['* 가산점 : 봉사상 수상', '  (학년별 상위 4%까지)', '  1년→1점']}
-                size={12}
-                x={850}
-                y={650}
+            </label>
+            <label className="personal-grade-records-mini-card personal-grade-records-mini-card--check">
+              <input
+                type="checkbox"
+                checked={hasVolunteerAward(recordData.volunteer)}
+                onChange={(event) => updateVolunteerField('award', event.target.checked)}
               />
-            </g>
-          </svg>
-        </article>
-      </section>
+              <strong>봉사상</strong>
+            </label>
+          </div>
+        </section>
+      </div>
     </section>
   )
 }
