@@ -47,6 +47,37 @@ function removeScriptReferences(xmlText) {
     .replace(/<opf:itemref[^>]+idref="sourcesc"[^>]*\/>/g, '')
 }
 
+function removeScriptFiles(zip) {
+  ;['Scripts/headerScripts.js', 'Scripts/sourceScripts.js'].forEach((fileName) => {
+    if (zip.file(fileName)) {
+      zip.remove(fileName)
+    }
+  })
+
+  Object.keys(zip.files)
+    .filter((fileName) => zip.files[fileName].dir && fileName === 'Scripts/')
+    .forEach((fileName) => zip.remove(fileName))
+}
+
+function replaceContentHpfSections(contentHpf, sectionCount) {
+  const sectionItems = Array.from(
+    { length: sectionCount },
+    (_, index) =>
+      `<opf:item id="section${index}" href="Contents/section${index}.xml" media-type="application/xml"/>`,
+  ).join('')
+  const sectionSpineItems = Array.from(
+    { length: sectionCount },
+    (_, index) => `<opf:itemref idref="section${index}" linear="yes"/>`,
+  ).join('')
+
+  return removeScriptReferences(contentHpf)
+    .replace(
+      /<opf:item id="section0" href="Contents\/section0\.xml" media-type="application\/xml"\/>/,
+      sectionItems,
+    )
+    .replace(/<opf:itemref idref="section0" linear="yes"\/>/, sectionSpineItems)
+}
+
 function downloadBlob(blob, fileName) {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
@@ -83,6 +114,25 @@ async function createHwpxBlobWithLocalHancom(student, recordData) {
   return response.blob()
 }
 
+function shouldUseBrowserHwpxFallback(error) {
+  return (
+    error instanceof TypeError ||
+    /failed to fetch|networkerror|load failed|fetch failed/i.test(error?.message ?? '')
+  )
+}
+
+async function createHwpxBlobWithBrowserFallback(student, recordData) {
+  try {
+    return await createHwpxBlobWithLocalHancom(student, recordData)
+  } catch (error) {
+    if (!shouldUseBrowserHwpxFallback(error)) {
+      throw error
+    }
+
+    return createPersonalGradeRecordHwpxBlob(student, recordData)
+  }
+}
+
 async function createClassHwpxBlobWithLocalHancom(studentsWithRecords, fileName) {
   const response = await fetch(LOCAL_HWP_CLASS_EXPORT_API_URL, {
     method: 'POST',
@@ -109,6 +159,18 @@ async function createClassHwpxBlobWithLocalHancom(studentsWithRecords, fileName)
   }
 
   return response.blob()
+}
+
+async function createClassHwpxBlobWithBrowserFallback(studentsWithRecords, fileName) {
+  try {
+    return await createClassHwpxBlobWithLocalHancom(studentsWithRecords, fileName)
+  } catch (error) {
+    if (!shouldUseBrowserHwpxFallback(error)) {
+      throw error
+    }
+
+    return createCombinedClassPersonalGradeRecordHwpxBlob(studentsWithRecords)
+  }
 }
 
 function getZipFlagForMethod(method) {
@@ -167,6 +229,40 @@ function patchHwpxZipMetadata(arrayBuffer) {
   return bytes
 }
 
+async function createHwpxBlobFromZip(zip, mimeTypeText) {
+  await Promise.all(
+    Object.keys(zip.files)
+      .filter((fileName) => {
+        return shouldStoreWithoutCompression(fileName) && fileName !== 'mimetype'
+      })
+      .map(async (fileName) => {
+        const fileData = await zip.file(fileName).async('arraybuffer')
+        zip.file(fileName, fileData, {
+          binary: true,
+          compression: 'STORE',
+          createFolders: false,
+        })
+      }),
+  )
+
+  if (mimeTypeText) {
+    zip.file('mimetype', mimeTypeText, { compression: 'STORE' })
+  }
+
+  const generatedArrayBuffer = await zip.generateAsync({
+    type: 'arraybuffer',
+    compression: 'DEFLATE',
+    compressionOptions: {
+      level: 6,
+    },
+    mimeType: 'application/haansofthwpx',
+  })
+
+  return new Blob([patchHwpxZipMetadata(generatedArrayBuffer)], {
+    type: 'application/haansofthwpx',
+  })
+}
+
 export async function createPersonalGradeRecordHwpxBlob(student, recordData) {
   const { default: JSZip } = await import('jszip')
   const response = await fetch(HWPX_TEMPLATE_PATH)
@@ -199,51 +295,53 @@ export async function createPersonalGradeRecordHwpxBlob(student, recordData) {
     }),
   )
 
-  ;['Scripts/headerScripts.js', 'Scripts/sourceScripts.js'].forEach((fileName) => {
-    if (zip.file(fileName)) {
-      zip.remove(fileName)
-    }
-  })
+  removeScriptFiles(zip)
 
-  Object.keys(zip.files)
-    .filter((fileName) => zip.files[fileName].dir && fileName === 'Scripts/')
-    .forEach((fileName) => zip.remove(fileName))
+  return createHwpxBlobFromZip(zip, mimeTypeText)
+}
 
-  const storedBinaryFiles = Object.keys(zip.files).filter((fileName) => {
-    return shouldStoreWithoutCompression(fileName) && fileName !== 'mimetype'
-  })
+async function createCombinedClassPersonalGradeRecordHwpxBlob(studentsWithRecords) {
+  const { default: JSZip } = await import('jszip')
+  const response = await fetch(HWPX_TEMPLATE_PATH)
 
-  await Promise.all(
-    storedBinaryFiles.map(async (fileName) => {
-      const fileData = await zip.file(fileName).async('arraybuffer')
-      zip.file(fileName, fileData, {
-        binary: true,
-        compression: 'STORE',
-        createFolders: false,
-      })
-    }),
-  )
-
-  if (mimeTypeText) {
-    zip.file('mimetype', mimeTypeText, { compression: 'STORE' })
+  if (!response.ok) {
+    throw new Error('개인내신성적관리부 HWPX 템플릿을 불러오지 못했습니다.')
   }
 
-  const generatedArrayBuffer = await zip.generateAsync({
-    type: 'arraybuffer',
-    compression: 'DEFLATE',
-    compressionOptions: {
-      level: 6,
-    },
-    mimeType: 'application/haansofthwpx',
+  const zip = await JSZip.loadAsync(await response.arrayBuffer())
+  const mimeTypeText = await zip.file('mimetype')?.async('text')
+  const sectionTemplate = await zip.file('Contents/section0.xml')?.async('text')
+  const contentHpf = await zip.file('Contents/content.hpf')?.async('text')
+
+  if (!sectionTemplate || !contentHpf) {
+    throw new Error('개인내신성적관리부 HWPX 템플릿의 본문을 찾지 못했습니다.')
+  }
+
+  Object.keys(zip.files)
+    .filter((fileName) => /^Contents\/section\d+\.xml$/.test(fileName))
+    .forEach((fileName) => zip.remove(fileName))
+
+  studentsWithRecords.forEach(({ student, recordData }, index) => {
+    const placeholders = buildPersonalGradeRecordPlaceholders(student, recordData)
+    zip.file(`Contents/section${index}.xml`, replacePlaceholders(sectionTemplate, placeholders), {
+      createFolders: false,
+    })
   })
 
-  return new Blob([patchHwpxZipMetadata(generatedArrayBuffer)], {
-    type: 'application/haansofthwpx',
-  })
+  zip.file(
+    'Contents/content.hpf',
+    replaceContentHpfSections(contentHpf, studentsWithRecords.length),
+    {
+      createFolders: false,
+    },
+  )
+  removeScriptFiles(zip)
+
+  return createHwpxBlobFromZip(zip, mimeTypeText)
 }
 
 export async function downloadPersonalGradeRecordHwpx(student, recordData) {
-  const blob = await createHwpxBlobWithLocalHancom(student, recordData)
+  const blob = await createHwpxBlobWithBrowserFallback(student, recordData)
   downloadBlob(blob, createPersonalGradeRecordFileName(student))
 }
 
@@ -252,7 +350,7 @@ export async function downloadClassPersonalGradeRecordZip(studentsWithRecords, z
   const zip = new JSZip()
 
   for (const { student, recordData } of studentsWithRecords) {
-    const hwpxBlob = await createHwpxBlobWithLocalHancom(student, recordData)
+    const hwpxBlob = await createHwpxBlobWithBrowserFallback(student, recordData)
     zip.file(createPersonalGradeRecordFileName(student), hwpxBlob)
   }
 
@@ -264,6 +362,6 @@ export async function downloadCombinedClassPersonalGradeRecordHwpx(
   studentsWithRecords,
   fileName,
 ) {
-  const blob = await createClassHwpxBlobWithLocalHancom(studentsWithRecords, fileName)
+  const blob = await createClassHwpxBlobWithBrowserFallback(studentsWithRecords, fileName)
   downloadBlob(blob, fileName)
 }
