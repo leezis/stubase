@@ -23,7 +23,7 @@ function parseVolunteerRows(rows, fileName) {
     const studentName = String(row[1] ?? '').trim()
     const cumulativeHours = normalizeHours(row[8])
 
-    if (studentNumText === '번호') {
+    if (/^번\s*호$/.test(studentNumText)) {
       return
     }
 

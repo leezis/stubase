@@ -149,8 +149,10 @@ export async function importPersonalGradeRecordExcel({ files, kind }) {
 
   importedRecords.forEach((importedRecord) => {
     const matchedStudent = studentsByKey.get(getMatchedStudentKey(importedRecord))
+    const matchedName = String(matchedStudent?.name ?? '').trim()
+    const importedName = String(importedRecord.studentName ?? '').trim()
 
-    if (!matchedStudent || matchedStudent.name !== importedRecord.studentName) {
+    if (!matchedStudent || matchedName !== importedName) {
       unmatchedImports.push(importedRecord)
       return
     }

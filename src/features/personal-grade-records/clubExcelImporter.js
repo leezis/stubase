@@ -15,7 +15,7 @@ function parseClubRows(rows, fileName) {
     const clubClassName = String(row[3] ?? '').trim()
     const teacherName = String(row[4] ?? '').trim()
 
-    if (!clubName || studentNumText === '번 호') {
+    if (!clubName || /^번\s*호$/.test(studentNumText)) {
       return
     }
 

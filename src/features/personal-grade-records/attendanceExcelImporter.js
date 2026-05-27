@@ -4,6 +4,10 @@ import {
 } from './excelWorkbookReader.js'
 
 function normalizeNumber(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return ''
+  }
+
   const number = Number(value)
   return Number.isFinite(number) ? String(number) : ''
 }

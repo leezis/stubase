@@ -1,6 +1,7 @@
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -14,10 +15,38 @@ import {
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const repoRoot = path.resolve(__dirname, '..')
-const port = Number(process.env.PERSONAL_GRADE_HWP_PORT || 4186)
+
+const DEFAULT_PORT = 4186
+const portCandidate = Number(process.env.PERSONAL_GRADE_HWP_PORT)
+const port =
+  Number.isInteger(portCandidate) && portCandidate > 0 && portCandidate < 65536
+    ? portCandidate
+    : DEFAULT_PORT
+
 const templatePath = path.join(repoRoot, 'public', 'forms', 'personal-grade-record-template.hwpx')
 const workerScriptPath = path.join(repoRoot, 'scripts', 'personal-grade-hwp-worker.ps1')
-const powershellPath = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+
+function resolvePowerShellPath() {
+  if (process.env.POWERSHELL_PATH && existsSync(process.env.POWERSHELL_PATH)) {
+    return process.env.POWERSHELL_PATH
+  }
+
+  const windir = process.env.WINDIR || process.env.SystemRoot || 'C:\\Windows'
+  const candidates = [
+    path.join(windir, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+    path.join(windir, 'SysWOW64', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+  ]
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate
+    }
+  }
+
+  return 'powershell.exe'
+}
+
+const powershellPath = resolvePowerShellPath()
 const ZIP_LOCAL_FILE_HEADER = 0x04034b50
 const ZIP_CENTRAL_FILE_HEADER = 0x02014b50
 const ZIP_END_OF_CENTRAL_DIRECTORY = 0x06054b50

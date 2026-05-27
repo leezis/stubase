@@ -336,11 +336,13 @@ function PersonalGradeRecords({
 
   useEffect(() => {
     onHeaderActionsChange?.(headerActions)
+  }, [headerActions, onHeaderActionsChange])
 
+  useEffect(() => {
     return () => {
       onHeaderActionsChange?.(null)
     }
-  }, [headerActions, onHeaderActionsChange])
+  }, [onHeaderActionsChange])
 
   return (
     <section className="detail-section personal-grade-records-shell">

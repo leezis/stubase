@@ -297,8 +297,6 @@ function App() {
   const [activeView, setActiveView] = useState('home')
   const [students, setStudents] = useState([])
   const [selectedStudent, setSelectedStudent] = useState(null)
-  const [, setStatusMessage] = useState(initialStatusMessage)
-  const [, setErrorMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isLoadingMoreStudents, setIsLoadingMoreStudents] = useState(false)
@@ -329,6 +327,9 @@ function App() {
 
   const authUserId = authUser?.id ?? ''
   const selectedStudentId = selectedStudent?.id ?? null
+  const visibleSelectedStudent =
+    students.find((student) => student.id === selectedStudentId) ?? null
+  const previewStudent = visibleSelectedStudent
   const activeSchoolWorkModule = SCHOOL_WORK_MODULES.find(
     (module) => module.id === activeView,
   )
@@ -455,6 +456,16 @@ function App() {
   function showToast(message, tone = 'info') {
     setToastMessage(message)
     setToastTone(tone)
+  }
+
+  function setStatusMessage(_message) {
+    void _message
+  }
+
+  function setErrorMessage(message) {
+    if (message) {
+      showToast(message, 'error')
+    }
   }
 
   function clearActiveWorkspaceSelectedStudent() {
@@ -862,7 +873,7 @@ function App() {
       .limit(1)
 
     if (latestStudentError) {
-      setErrorMessage(getFriendlySupabaseErrorMessage('insert', latestStudentError))
+      setErrorMessage(getFriendlySupabaseErrorMessage('select', latestStudentError))
       setStatusMessage('테스트 학생 번호를 계산하지 못했습니다.')
       setIsCreatingTest(false)
       return
@@ -1137,69 +1148,6 @@ function App() {
     }
 
     setIsUploadingAvatar(false)
-  }
-
-  function _handleEditStudent(student) {
-    setActiveView('student-create')
-    setIsStudentDetailScrollPending(false)
-    setIsManagementMenuOpen(false)
-    setIsSchoolWorkMenuOpen(false)
-    setEditingStudentId(student.id)
-    setErrorMessage('')
-    setFormErrors({})
-    setFormValues({
-      name: student.name ?? '',
-      grade: String(student.grade ?? ''),
-      classNum: String(student.class_num ?? ''),
-      studentNum: String(student.student_num ?? ''),
-    })
-    setStatusMessage(`${student.name} 학생 정보를 수정하는 중입니다.`)
-  }
-
-  async function _handleDeleteStudent(student) {
-    if (!supabase || !authUserId) {
-      return
-    }
-
-    const shouldDelete = window.confirm(
-      `${student.name} 학생을 삭제할까요? 이 작업은 되돌릴 수 없습니다.`,
-    )
-
-    if (!shouldDelete) {
-      return
-    }
-
-    setDeletingStudentId(student.id)
-    setErrorMessage('')
-    setStatusMessage(`${student.name} 학생을 삭제하는 중입니다.`)
-
-    const { error } = await supabase.from('students').delete().eq('id', student.id)
-
-    if (error) {
-      setErrorMessage(getFriendlySupabaseErrorMessage('delete', error))
-      setStatusMessage('학생 삭제 권한을 확인해 주세요.')
-      setDeletingStudentId(null)
-      return
-    }
-
-    if (editingStudentId === student.id) {
-      resetStudentForm()
-    }
-
-    if (selectedStudentId === student.id) {
-      clearSelectedStudent()
-    }
-
-    setSchoolWorkSelectedStudentIds((previous) => {
-      const nextEntries = Object.entries(previous).filter(
-        ([, selectedId]) => selectedId !== student.id,
-      )
-      return Object.fromEntries(nextEntries)
-    })
-
-    setDeletingStudentId(null)
-    setStatusMessage(`${student.name} 학생을 삭제했습니다.`)
-    await loadStudents({ reset: true, showRefreshState: true })
   }
 
   function handleStudentInputChange(event) {
@@ -1678,9 +1626,6 @@ function App() {
   const activeWorkspaceSelectedStudent = isSchoolWorkStudentWorkspaceView
     ? activeSchoolWorkSelectedStudent
     : selectedStudent
-  const visibleSelectedStudent =
-    students.find((student) => student.id === selectedStudentId) ?? null
-  const previewStudent = visibleSelectedStudent
   const previewStudentCounselingCount = previewStudent
     ? counselingCountMap[previewStudent.id] ?? 0
     : 0
