@@ -52,10 +52,6 @@ const CLASS_FILTER_OPTIONS = Array.from({ length: 3 }, (_, gradeIndex) =>
   })),
 ).flat()
 
-const initialStatusMessage = hasSupabaseEnv
-  ? '학생 데이터를 불러오는 중입니다.'
-  : getSupabaseEnvHelpMessage()
-
 const initialStudentFormValues = {
   name: '',
   grade: '',
@@ -458,10 +454,6 @@ function App() {
     setToastTone(tone)
   }
 
-  function setStatusMessage(_message) {
-    void _message
-  }
-
   function setErrorMessage(message) {
     if (message) {
       showToast(message, 'error')
@@ -495,7 +487,6 @@ function App() {
     if (nextStudent) {
       setSelectedStudent(nextStudent)
       setCounselingRefreshKey(0)
-      setStatusMessage(`${nextStudent.name} 학생의 상담 화면을 열었습니다.`)
     }
 
     setIsStudentDetailScrollPending(true)
@@ -564,9 +555,6 @@ function App() {
         ...previous,
         [nextModule.id]: nextStudent.id,
       }))
-      setStatusMessage(`${nextStudent.name} 학생의 ${nextModule.menu.title} 화면을 열었습니다.`)
-    } else {
-      setStatusMessage(`${nextModule.menu.title} 화면을 열었습니다.`)
     }
   }
 
@@ -654,7 +642,6 @@ function App() {
     setStudents([])
     setSelectedStudent(null)
     setSchoolWorkSelectedStudentIds({})
-    setStatusMessage(initialStatusMessage)
     setErrorMessage('')
     setIsLoading(false)
     setIsRefreshing(false)
@@ -730,7 +717,6 @@ function App() {
 
     const gradeValue = activeSelectedGrade
     const classValue = activeSelectedClass
-    const hasQueryFilters = Boolean(gradeValue || classValue)
     const from = reset ? 0 : nextRangeStartRef.current
     const to = from + PAGE_SIZE - 1
 
@@ -740,15 +726,8 @@ function App() {
       } else {
         setIsLoading(true)
       }
-
-      setStatusMessage(
-        hasQueryFilters
-          ? '선택한 학급 학생을 불러오는 중입니다.'
-          : 'students 테이블을 불러오는 중입니다.',
-      )
     } else {
       setIsLoadingMoreStudents(true)
-      setStatusMessage('학생 목록을 더 불러오는 중입니다.')
     }
 
     setErrorMessage('')
@@ -768,7 +747,6 @@ function App() {
       }
 
       setErrorMessage(getFriendlySupabaseErrorMessage('select', error))
-      setStatusMessage('학생 목록을 불러오지 못했습니다.')
       setIsLoading(false)
       setIsRefreshing(false)
       setIsLoadingMoreStudents(false)
@@ -793,20 +771,6 @@ function App() {
 
       return [...previous, ...mergedChunk]
     })
-
-    if (!nextTotalCount) {
-      setStatusMessage(
-        hasQueryFilters
-          ? '조건에 맞는 학생이 없습니다.'
-          : '등록된 학생이 아직 없습니다.',
-      )
-    } else {
-      setStatusMessage(
-        hasQueryFilters
-          ? `선택한 조건의 학생 ${nextTotalCount}명 중 ${nextLoadedCount}명을 표시하고 있습니다.`
-          : `전체 학생 ${nextTotalCount}명 중 ${nextLoadedCount}명을 표시하고 있습니다.`,
-      )
-    }
 
     setIsLoading(false)
     setIsRefreshing(false)
@@ -843,13 +807,11 @@ function App() {
 
     setIsSigningOut(true)
     setErrorMessage('')
-    setStatusMessage('로그아웃하는 중입니다.')
 
     const { error } = await supabase.auth.signOut()
 
     if (error) {
       setErrorMessage(getFriendlyAuthErrorMessage(error))
-      setStatusMessage('로그아웃에 실패했습니다.')
       setIsSigningOut(false)
       return
     }
@@ -862,7 +824,6 @@ function App() {
 
     setIsCreatingTest(true)
     setErrorMessage('')
-    setStatusMessage('테스트 학생을 추가하는 중입니다.')
 
     const { data: latestStudentRows, error: latestStudentError } = await supabase
       .from('students')
@@ -874,7 +835,6 @@ function App() {
 
     if (latestStudentError) {
       setErrorMessage(getFriendlySupabaseErrorMessage('select', latestStudentError))
-      setStatusMessage('테스트 학생 번호를 계산하지 못했습니다.')
       setIsCreatingTest(false)
       return
     }
@@ -892,12 +852,10 @@ function App() {
 
     if (error) {
       setErrorMessage(getFriendlySupabaseErrorMessage('insert', error))
-      setStatusMessage('테스트 학생 추가에 실패했습니다.')
       setIsCreatingTest(false)
       return
     }
 
-    setStatusMessage('테스트 학생이 추가되었습니다.')
     setIsCreatingTest(false)
     await loadStudents({ reset: true, showRefreshState: true })
   }
@@ -912,20 +870,12 @@ function App() {
         ...previous,
         [sourceSchoolWorkModule.id]: student.id,
       }))
-      setStatusMessage(
-        `${student.name} 학생의 ${sourceSchoolWorkModule.menu.title} 화면을 열었습니다.`,
-      )
       return
     }
 
     setSelectedStudent(student)
     setCounselingRefreshKey(0)
     setExpandedCounselingRecordId(null)
-    setStatusMessage(
-      sourceView === 'counseling'
-        ? `${student.name} 학생의 상담 화면을 열었습니다.`
-        : `${student.name} 학생을 선택했습니다.`,
-    )
   }
 
   function handleOpenCounselingRecordFromHome(record) {
@@ -939,7 +889,6 @@ function App() {
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
     setIsStudentDetailScrollPending(true)
-    setStatusMessage(`${previewStudent.name} 학생의 상담 기록을 열었습니다.`)
   }
 
   function handleOpenPreviewStudentCounseling() {
@@ -954,7 +903,6 @@ function App() {
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
     setIsStudentDetailScrollPending(true)
-    setStatusMessage(`${previewStudent.name} 학생의 상담 화면을 열었습니다.`)
   }
 
   function handleOpenPreviewStudentPersonalGradeRecords() {
@@ -987,12 +935,10 @@ function App() {
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
     setIsStudentDetailScrollPending(true)
-    setStatusMessage(`${previewStudent.name} 학생의 개인내신성적관리부 화면을 열었습니다.`)
   }
 
-  function handleCounselingSaveSuccess(studentName) {
+  function handleCounselingSaveSuccess() {
     setCounselingRefreshKey((previous) => previous + 1)
-    setStatusMessage(`${studentName} 학생의 상담 기록을 저장했습니다.`)
   }
 
   function updateStudentAvatarState(studentId, avatarUrl) {
@@ -1081,13 +1027,11 @@ function App() {
 
     if (!selectedFile.type.startsWith('image/')) {
       setErrorMessage('이미지 파일만 업로드할 수 있습니다.')
-      setStatusMessage('프로필 사진 업로드 형식을 확인해 주세요.')
       return
     }
 
     setIsUploadingAvatar(true)
     setErrorMessage('')
-    setStatusMessage(`${selectedStudent.name} 학생의 프로필 사진을 업로드하는 중입니다.`)
     setAvatarLoadFailed(selectedStudent.id, false)
 
     const localPreviewUrl = URL.createObjectURL(selectedFile)
@@ -1108,7 +1052,6 @@ function App() {
 
     if (uploadError) {
       setErrorMessage(getFriendlyAvatarUploadErrorMessage(uploadError))
-      setStatusMessage('프로필 사진 업로드에 실패했습니다.')
       setIsUploadingAvatar(false)
       return
     }
@@ -1124,7 +1067,6 @@ function App() {
 
     if (updateError) {
       setErrorMessage(getFriendlyAvatarStudentUpdateErrorMessage(updateError))
-      setStatusMessage('사진 URL 업데이트에 실패했습니다.')
       setIsUploadingAvatar(false)
       return
     }
@@ -1134,17 +1076,12 @@ function App() {
 
     const isPublicImageReady = await verifyImageSource(displayAvatarUrl)
 
-    if (isPublicImageReady) {
-      setAvatarPreviewForStudent(selectedStudent.id, '')
-    } else {
+    setAvatarPreviewForStudent(selectedStudent.id, '')
+
+    if (!isPublicImageReady) {
       setErrorMessage(
         '사진은 업로드되었지만 공개 이미지 응답이 아직 보이지 않습니다. avatars 버킷이 Public인지 확인해 주세요.',
       )
-      setStatusMessage('프로필 사진 업로드는 완료되었지만 표시 확인이 필요합니다.')
-    }
-
-    if (isPublicImageReady) {
-      setStatusMessage(`${selectedStudent.name} 학생의 프로필 사진이 업데이트되었습니다.`)
     }
 
     setIsUploadingAvatar(false)
@@ -1173,18 +1110,46 @@ function App() {
   function handleClassChipClick(nextGrade, nextClass) {
     const shouldReset =
       activeSelectedGrade === nextGrade && activeSelectedClass === nextClass
+    const defaultFilters =
+      activeSchoolWorkModule?.studentWorkspace?.defaultFilters ??
+      emptyStudentWorkspaceFilters
+
+    const effectiveGrade = isSchoolWorkStudentWorkspaceView
+      ? shouldReset
+        ? defaultFilters.selectedGrade
+        : nextGrade
+      : shouldReset
+        ? ''
+        : nextGrade
+    const effectiveClass = isSchoolWorkStudentWorkspaceView
+      ? shouldReset
+        ? defaultFilters.selectedClass
+        : nextClass
+      : shouldReset
+        ? ''
+        : nextClass
 
     if (isSchoolWorkStudentWorkspaceView) {
       updateActiveSchoolWorkStudentFilters({
-        selectedGrade: shouldReset ? '' : nextGrade,
-        selectedClass: shouldReset ? '' : nextClass,
+        selectedGrade: effectiveGrade,
+        selectedClass: effectiveClass,
       })
     } else {
-      setSelectedGrade(shouldReset ? '' : nextGrade)
-      setSelectedClass(shouldReset ? '' : nextClass)
+      setSelectedGrade(effectiveGrade)
+      setSelectedClass(effectiveClass)
     }
 
-    clearActiveWorkspaceSelectedStudent()
+    const currentStudent = isSchoolWorkStudentWorkspaceView
+      ? activeSchoolWorkSelectedStudent
+      : selectedStudent
+    const stillMatches = currentStudent
+      ? (!effectiveGrade || String(currentStudent.grade) === effectiveGrade) &&
+        (!effectiveClass || String(currentStudent.class_num) === effectiveClass)
+      : false
+
+    if (!stillMatches) {
+      clearActiveWorkspaceSelectedStudent()
+    }
   }
 
   async function handleSubmitStudent(event) {
@@ -1199,7 +1164,6 @@ function App() {
 
     if (!validation.payload) {
       setErrorMessage('')
-      setStatusMessage('학생 입력값을 확인해 주세요.')
       return
     }
 
@@ -1217,7 +1181,6 @@ function App() {
           duplicateLookupError,
         ),
       )
-      setStatusMessage('중복 학생 여부를 확인하지 못했습니다.')
       return
     }
 
@@ -1226,7 +1189,6 @@ function App() {
         studentNum: createDuplicateErrorMessage(validation.payload),
       })
       setErrorMessage('')
-      setStatusMessage('중복된 학년, 반, 번호 조합인지 확인해 주세요.')
       return
     }
 
@@ -1234,11 +1196,6 @@ function App() {
 
     setIsSubmittingForm(true)
     setErrorMessage('')
-    setStatusMessage(
-      editingTargetId
-        ? `${validation.payload.name} 학생 정보를 수정하는 중입니다.`
-        : `${validation.payload.name} 학생을 추가하는 중입니다.`,
-    )
 
     const query = editingTargetId
       ? supabase
@@ -1256,16 +1213,9 @@ function App() {
           error,
         ),
       )
-      setStatusMessage(
-        editingTargetId
-          ? '학생 수정에 실패했습니다.'
-          : '학생 추가에 실패했습니다.',
-      )
       setIsSubmittingForm(false)
       return
     }
-
-    const successStudentName = validation.payload.name
 
     if (editingTargetId && selectedStudentId === editingTargetId) {
       setSelectedStudent((previous) =>
@@ -1276,11 +1226,6 @@ function App() {
     }
 
     resetStudentForm()
-    setStatusMessage(
-      editingTargetId
-        ? `${successStudentName} 학생 정보를 수정했습니다.`
-        : `${successStudentName} 학생을 추가했습니다.`,
-    )
     setIsSubmittingForm(false)
     await loadStudents({ reset: true, showRefreshState: true })
   }
@@ -1387,7 +1332,6 @@ function App() {
       }
 
       setAuthErrorMessage('')
-      setStatusMessage('학생 데이터를 불러오는 중입니다.')
     }
 
     void (async () => {
@@ -1426,6 +1370,43 @@ function App() {
       })
     }
   }, [])
+
+  const runPruneSelections = useEffectEvent((nextStudents) => {
+    const validIds = new Set(nextStudents.map((student) => student.id))
+
+    setSchoolWorkSelectedStudentIds((previous) => {
+      const next = {}
+      let didChange = false
+
+      for (const [moduleId, studentId] of Object.entries(previous)) {
+        if (validIds.has(studentId)) {
+          next[moduleId] = studentId
+        } else {
+          didChange = true
+        }
+      }
+
+      return didChange ? next : previous
+    })
+
+    setSelectedStudent((previous) =>
+      previous && !validIds.has(previous.id) ? null : previous,
+    )
+  })
+
+  useEffect(() => {
+    if (!students.length) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      runPruneSelections(students)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [students])
 
   const runStudentQueryReset = useEffectEvent(() => {
     void loadStudents({ reset: true })
@@ -1973,7 +1954,6 @@ function App() {
     <BatchAvatarUpload
       authUserId={authUserId}
       onAvatarUpdated={updateStudentAvatarState}
-      onStatusMessage={setStatusMessage}
     />
   )
 
@@ -2317,7 +2297,7 @@ function App() {
                       </p>
 
                       <CounselingForm
-                        key={`${activeWorkspaceSelectedStudent.id}-${counselingRefreshKey}`}
+                        key={activeWorkspaceSelectedStudent.id}
                         studentId={activeWorkspaceSelectedStudent.id}
                         studentName={activeWorkspaceSelectedStudent.name}
                         expandedRecordId={expandedCounselingRecordId}

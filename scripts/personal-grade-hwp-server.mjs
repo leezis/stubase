@@ -223,27 +223,6 @@ process.on('exit', () => {
   stopHwpWorker()
 })
 
-function escapeXml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-}
-
-function replacePlaceholders(xmlText, placeholders) {
-  return Object.entries(placeholders).reduce((nextText, [key, value]) => {
-    return nextText.replaceAll(`{{${key}}}`, escapeXml(value))
-  }, xmlText)
-}
-
-function removeScriptReferences(xmlText) {
-  return xmlText
-    .replace(/<opf:item[^>]+href="Scripts\/headerScripts\.js"[^>]*\/>/g, '')
-    .replace(/<opf:item[^>]+href="Scripts\/sourceScripts\.js"[^>]*\/>/g, '')
-    .replace(/<opf:itemref[^>]+idref="headersc"[^>]*\/>/g, '')
-    .replace(/<opf:itemref[^>]+idref="sourcesc"[^>]*\/>/g, '')
-}
-
 function shouldStoreWithoutCompression(fileName) {
   return (
     fileName === 'mimetype' ||
@@ -307,25 +286,6 @@ function patchHwpxZipMetadata(arrayBuffer) {
   }
 
   return bytes
-}
-
-function replaceContentHpfSections(contentHpf, sectionCount) {
-  const sectionItems = Array.from(
-    { length: sectionCount },
-    (_, index) =>
-      `<opf:item id="section${index}" href="Contents/section${index}.xml" media-type="application/xml"/>`,
-  ).join('')
-  const sectionSpineItems = Array.from(
-    { length: sectionCount },
-    (_, index) => `<opf:itemref idref="section${index}" linear="yes"/>`,
-  ).join('')
-
-  return removeScriptReferences(contentHpf)
-    .replace(
-      /<opf:item id="section0" href="Contents\/section0\.xml" media-type="application\/xml"\/>/,
-      sectionItems,
-    )
-    .replace(/<opf:itemref idref="section0" linear="yes"\/>/, sectionSpineItems)
 }
 
 async function generateHwpxBufferFromZip(zip) {
@@ -633,46 +593,6 @@ async function createHwpxWithHancom(student, recordData) {
   }
 }
 
-async function createCombinedHwpxSource(records) {
-  const { default: JSZip } = await import('jszip')
-  const zip = await JSZip.loadAsync(await readFile(templatePath))
-  const sectionTemplate = await zip.file('Contents/section0.xml')?.async('text')
-  const contentHpf = await zip.file('Contents/content.hpf')?.async('text')
-
-  if (!sectionTemplate || !contentHpf) {
-    throw new Error('개인내신성적관리부 HWPX 템플릿의 본문을 찾지 못했습니다.')
-  }
-
-  for (const fileName of Object.keys(zip.files)) {
-    if (/^Contents\/section\d+\.xml$/.test(fileName)) {
-      zip.remove(fileName)
-    }
-  }
-
-  records.forEach((record, index) => {
-    const placeholders = buildPersonalGradeRecordPlaceholders(record.student, record.recordData)
-    zip.file(`Contents/section${index}.xml`, replacePlaceholders(sectionTemplate, placeholders), {
-      createFolders: false,
-    })
-  })
-
-  zip.file('Contents/content.hpf', replaceContentHpfSections(contentHpf, records.length), {
-    createFolders: false,
-  })
-
-  ;['Scripts/headerScripts.js', 'Scripts/sourceScripts.js'].forEach((fileName) => {
-    if (zip.file(fileName)) {
-      zip.remove(fileName)
-    }
-  })
-
-  Object.keys(zip.files)
-    .filter((fileName) => zip.files[fileName].dir && fileName === 'Scripts/')
-    .forEach((fileName) => zip.remove(fileName))
-
-  return generateHwpxBufferFromZip(zip)
-}
-
 async function createCombinedHwpxWithHancom(records) {
   const workDirectory = path.join(tmpdir(), `personal-grade-combined-hwpx-${randomUUID()}`)
   const payloadPath = path.join(workDirectory, 'payload.json')
@@ -715,7 +635,13 @@ const server = createServer(async (request, response) => {
     return
   }
 
-  const url = new URL(request.url, `http://${request.headers.host}`)
+  let url
+  try {
+    url = new URL(request.url, `http://${request.headers.host}`)
+  } catch {
+    sendJson(response, 400, { error: 'Invalid request URL.' })
+    return
+  }
 
   if (request.method === 'GET' && url.pathname === '/health') {
     sendJson(response, 200, { ok: true })

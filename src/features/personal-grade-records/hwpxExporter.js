@@ -86,7 +86,9 @@ function downloadBlob(blob, fileName) {
   document.body.append(anchor)
   anchor.click()
   anchor.remove()
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url)
+  }, 1200)
 }
 
 async function createHwpxBlobWithLocalHancom(student, recordData) {

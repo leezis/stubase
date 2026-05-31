@@ -121,7 +121,7 @@ async function fetchAllStudentsForMatching() {
   }
 }
 
-function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
+function BatchAvatarUpload({ authUserId, onAvatarUpdated }) {
   const fileInputRef = useRef(null)
 
   const [entries, setEntries] = useState([])
@@ -173,7 +173,6 @@ function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
     setIsPreparing(true)
     setPhase('analyzing')
     setLocalErrorMessage('')
-    onStatusMessage?.(`${nextFiles.length}개 사진 파일을 분석하는 중입니다.`)
 
     const { data, error } = await fetchAllStudentsForMatching()
 
@@ -199,12 +198,6 @@ function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
     setEntries(nextEntries)
     setPhase('review')
     setIsPreparing(false)
-
-    if (nextEntries.length) {
-      onStatusMessage?.(
-        `파일 분석을 마쳤습니다. ${nextEntries.length}개 중 ${nextEntries.filter((entry) => entry.student).length}개가 학생과 매칭되었습니다.`,
-      )
-    }
   }
 
   async function processSingleEntry(entry) {
@@ -278,31 +271,14 @@ function BatchAvatarUpload({ authUserId, onAvatarUpdated, onStatusMessage }) {
     setIsProcessing(true)
     setPhase('uploading')
     setLocalErrorMessage('')
-    onStatusMessage?.(
-      `일괄 업로드를 시작했습니다. 총 ${uploadableEntries.length}개 매칭 파일을 처리합니다.`,
-    )
-
-    let successCount = 0
-    let failureCount = 0
 
     for (let startIndex = 0; startIndex < uploadableEntries.length; startIndex += BATCH_SIZE) {
       const chunk = uploadableEntries.slice(startIndex, startIndex + BATCH_SIZE)
-      const results = await Promise.all(chunk.map((entry) => processSingleEntry(entry)))
-
-      results.forEach((result) => {
-        if (result === 'completed') {
-          successCount += 1
-        } else {
-          failureCount += 1
-        }
-      })
+      await Promise.all(chunk.map((entry) => processSingleEntry(entry)))
     }
 
     setIsProcessing(false)
     setPhase('complete')
-    onStatusMessage?.(
-      `사진 일괄 업로드를 마쳤습니다. 성공 ${successCount}개, 확인 필요 ${unmatchedEntries.length + failureCount}개입니다.`,
-    )
   }
 
   function handleInputChange(event) {

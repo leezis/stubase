@@ -10,7 +10,7 @@ function normalizeHours(value) {
     return ''
   }
 
-  return Number.isInteger(number) ? String(number) : String(number)
+  return String(number)
 }
 
 function parseVolunteerRows(rows, fileName) {

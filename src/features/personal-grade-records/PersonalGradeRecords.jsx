@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import {
   downloadClassPersonalGradeRecordZip,
@@ -31,6 +31,17 @@ function PersonalGradeRecords({
   const [isExporting, setIsExporting] = useState(false)
   const [noticeMessage, setNoticeMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+  const recordDataRef = useRef(recordData)
+  const selectedStudentRef = useRef(selectedStudent)
+  const selectedStudentId = selectedStudent?.id ?? null
+
+  useEffect(() => {
+    recordDataRef.current = recordData
+  }, [recordData])
+
+  useEffect(() => {
+    selectedStudentRef.current = selectedStudent
+  }, [selectedStudent])
 
   useEffect(() => {
     let isMounted = true
@@ -40,7 +51,7 @@ function PersonalGradeRecords({
       setNoticeMessage('')
       setErrorMessage('')
 
-      if (!selectedStudent) {
+      if (!selectedStudentId) {
         return
       }
 
@@ -54,7 +65,7 @@ function PersonalGradeRecords({
       const { data, error } = await supabase
         .from('personal_grade_records')
         .select('data')
-        .eq('student_id', selectedStudent.id)
+        .eq('student_id', selectedStudentId)
         .eq('school_year', PERSONAL_GRADE_RECORD_SCHOOL_YEAR)
         .maybeSingle()
 
@@ -77,7 +88,7 @@ function PersonalGradeRecords({
     return () => {
       isMounted = false
     }
-  }, [dataRefreshKey, selectedStudent])
+  }, [dataRefreshKey, selectedStudentId])
 
   function updateStudentInfoField(field, value) {
     setRecordData((previous) => ({
@@ -175,7 +186,8 @@ function PersonalGradeRecords({
   }
 
   const handlePersonalHwpxDownload = useCallback(async () => {
-    if (!selectedStudent) {
+    const currentStudent = selectedStudentRef.current
+    if (!currentStudent) {
       return
     }
 
@@ -184,21 +196,21 @@ function PersonalGradeRecords({
     setErrorMessage('')
 
     try {
-      await downloadPersonalGradeRecordHwpx(selectedStudent, recordData)
+      await downloadPersonalGradeRecordHwpx(currentStudent, recordDataRef.current)
       setNoticeMessage('선택 학생의 HWPX 파일을 생성했습니다.')
     } catch (error) {
       setErrorMessage(error.message)
     } finally {
       setIsExporting(false)
     }
-  }, [recordData, selectedStudent])
+  }, [])
 
   const loadClassExportRows = useCallback(async () => {
     if (!supabase) {
       throw new Error('Supabase 연결 정보가 없어 파일을 생성할 수 없습니다.')
     }
 
-    const exportGrade = selectedGrade || selectedStudent?.grade || '1'
+    const exportGrade = selectedGrade || selectedStudentRef.current?.grade || '1'
     const exportClass = selectedClass || ''
     let studentQuery = supabase
       .from('students')
@@ -237,7 +249,7 @@ function PersonalGradeRecords({
         recordData: mergePersonalGradeRecordData(existingRecordMap.get(student.id)),
       })),
     }
-  }, [selectedClass, selectedGrade, selectedStudent])
+  }, [selectedClass, selectedGrade])
 
   const handleCombinedClassHwpxDownload = useCallback(async () => {
     setIsExporting(true)
@@ -303,7 +315,7 @@ function PersonalGradeRecords({
           className="ghost-button personal-grade-records-export-button personal-grade-records-export-button--student"
           type="button"
           onClick={handlePersonalHwpxDownload}
-          disabled={!selectedStudent || isBusy}
+          disabled={!selectedStudentId || isBusy}
         >
           개인저장
         </button>
@@ -330,7 +342,7 @@ function PersonalGradeRecords({
       handleCombinedClassHwpxDownload,
       handlePersonalHwpxDownload,
       isBusy,
-      selectedStudent,
+      selectedStudentId,
     ],
   )
 

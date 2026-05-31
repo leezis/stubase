@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import {
   PERSONAL_GRADE_RECORD_SCHOOL_YEAR,
@@ -75,13 +75,17 @@ function PersonalGradeRecordsUploadStatus({
   const [summary, setSummary] = useState(() => createEmptyUploadSummary())
   const [isLoading, setIsLoading] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const latestRequestIdRef = useRef(0)
 
   useEffect(() => {
-    let isMounted = true
+    const requestId = latestRequestIdRef.current + 1
+    latestRequestIdRef.current = requestId
 
     async function loadUploadStatus() {
       if (!supabase) {
-        setErrorMessage('Supabase 연결 정보가 없어 업로드 현황을 불러올 수 없습니다.')
+        if (requestId === latestRequestIdRef.current) {
+          setErrorMessage('Supabase 연결 정보가 없어 업로드 현황을 불러올 수 없습니다.')
+        }
         return
       }
 
@@ -100,6 +104,10 @@ function PersonalGradeRecordsUploadStatus({
 
         const { data: students, error: studentsError } = await studentQuery
 
+        if (requestId !== latestRequestIdRef.current) {
+          return
+        }
+
         if (studentsError) {
           throw studentsError
         }
@@ -114,6 +122,10 @@ function PersonalGradeRecordsUploadStatus({
             .eq('school_year', PERSONAL_GRADE_RECORD_SCHOOL_YEAR)
             .in('student_id', studentIds)
 
+          if (requestId !== latestRequestIdRef.current) {
+            return
+          }
+
           if (recordsError) {
             throw recordsError
           }
@@ -127,25 +139,21 @@ function PersonalGradeRecordsUploadStatus({
           })
         }
 
-        if (isMounted) {
+        if (requestId === latestRequestIdRef.current) {
           setSummary(nextSummary)
         }
       } catch (error) {
-        if (isMounted) {
+        if (requestId === latestRequestIdRef.current) {
           setErrorMessage(getPersonalGradeRecordErrorMessage(error))
         }
       } finally {
-        if (isMounted) {
+        if (requestId === latestRequestIdRef.current) {
           setIsLoading(false)
         }
       }
     }
 
     void loadUploadStatus()
-
-    return () => {
-      isMounted = false
-    }
   }, [dataRefreshKey, selectedClass, selectedGrade])
 
   const statusValues = Object.values(summary)

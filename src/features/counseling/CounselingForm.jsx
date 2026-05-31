@@ -995,12 +995,6 @@ const styles = {
     justifyContent: 'space-between',
     gap: '12px',
   },
-  recordMetaBlock: {
-    display: 'grid',
-    gap: '8px',
-    flex: '1 1 auto',
-    minWidth: '0',
-  },
   recordMetaButton: {
     display: 'grid',
     gap: '8px',

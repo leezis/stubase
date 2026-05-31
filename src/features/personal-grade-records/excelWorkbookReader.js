@@ -92,7 +92,11 @@ export async function readFirstWorksheetRows(file) {
   const sharedStrings = await readSharedStrings(zip)
   const firstSheetName = Object.keys(zip.files)
     .filter((fileName) => /^xl\/worksheets\/sheet\d+\.xml$/.test(fileName))
-    .sort()[0]
+    .sort((leftName, rightName) => {
+      const leftNumber = Number(leftName.match(/sheet(\d+)\.xml$/)?.[1] ?? 0)
+      const rightNumber = Number(rightName.match(/sheet(\d+)\.xml$/)?.[1] ?? 0)
+      return leftNumber - rightNumber
+    })[0]
 
   if (!firstSheetName) {
     throw new Error(`${file.name} 파일에서 시트를 찾지 못했습니다.`)

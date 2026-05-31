@@ -74,6 +74,8 @@ const excelImportConfigByKind = {
   },
 }
 
+const STUDENT_FETCH_PAGE_SIZE = 1000
+
 async function fetchStudentsForImportedRecords(importedRecords) {
   const classGroups = new Map()
 
@@ -91,19 +93,31 @@ async function fetchStudentsForImportedRecords(importedRecords) {
   const studentsByKey = new Map()
 
   for (const classGroup of classGroups.values()) {
-    const { data, error } = await supabase
-      .from('students')
-      .select('id, name, grade, class_num, student_num')
-      .eq('grade', classGroup.grade)
-      .eq('class_num', classGroup.classNum)
+    let rangeStart = 0
 
-    if (error) {
-      throw error
+    while (true) {
+      const { data, error } = await supabase
+        .from('students')
+        .select('id, name, grade, class_num, student_num')
+        .eq('grade', classGroup.grade)
+        .eq('class_num', classGroup.classNum)
+        .range(rangeStart, rangeStart + STUDENT_FETCH_PAGE_SIZE - 1)
+
+      if (error) {
+        throw error
+      }
+
+      const rows = data ?? []
+      rows.forEach((student) => {
+        studentsByKey.set(getStudentKey(student), student)
+      })
+
+      if (rows.length < STUDENT_FETCH_PAGE_SIZE) {
+        break
+      }
+
+      rangeStart += STUDENT_FETCH_PAGE_SIZE
     }
-
-    ;(data ?? []).forEach((student) => {
-      studentsByKey.set(getStudentKey(student), student)
-    })
   }
 
   return studentsByKey
