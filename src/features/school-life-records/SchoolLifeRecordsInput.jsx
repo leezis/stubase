@@ -139,6 +139,30 @@ function formatActivityRowsForPrompt(activityRows) {
     .join('\n')
 }
 
+function getActivityDateSortValue(activity) {
+  const recordDate = formatDateForRecord(activity.date)
+  const dateMatch = recordDate.match(/^(\d{4})\.(\d{2})\.(\d{2})\.$/u)
+
+  if (!dateMatch) {
+    return Number.MAX_SAFE_INTEGER
+  }
+
+  return Number(`${dateMatch[1]}${dateMatch[2]}${dateMatch[3]}`)
+}
+
+function sortActivityRowsByDate(activityRows) {
+  return activityRows
+    .map((activity, index) => ({ activity, index }))
+    .sort((left, right) => {
+      const dateDifference =
+        getActivityDateSortValue(left.activity) -
+        getActivityDateSortValue(right.activity)
+
+      return dateDifference || left.index - right.index
+    })
+    .map(({ activity }) => activity)
+}
+
 function formatDateForRecord(date) {
   const trimmedDate = String(date ?? '').trim()
 
@@ -187,7 +211,9 @@ function getRandomActivityRows(activityRows, minCount = 3, maxCount = 4) {
   const targetCount =
     Math.floor(Math.random() * (maxCount - minCount + 1)) + minCount
 
-  return shuffledRows.slice(0, Math.min(targetCount, shuffledRows.length))
+  return sortActivityRowsByDate(
+    shuffledRows.slice(0, Math.min(targetCount, shuffledRows.length)),
+  )
 }
 
 function getRandomQualityWords(schoolLifeQualities, targetCount = 4) {
@@ -268,10 +294,10 @@ function formatActivityForRecordSentence(activity) {
 function fitSelfGovernmentRecordLength(text) {
   let fittedText = cleanGeneratedRecordText(text)
   const additions = [
-    '활동 과정에서 친구의 의견을 경청하고 필요한 도움을 주며 긍정적인 학급 분위기 형성에 기여함.',
-    '또한 공동체 속에서 자신의 역할을 먼저 찾고 끝까지 실천하려는 태도를 꾸준히 보임.',
-    '이를 바탕으로 학교생활 전반에서 책임 있는 자세와 배려의 태도를 안정적으로 실천함.',
-    '앞으로도 공동체의 규칙을 존중하며 주변을 살피는 태도를 이어갈 것으로 기대됨.',
+    '활동 과정에서 친구의 의견을 경청하고 필요한 도움을 주며 긍정적인 학급 분위기 형성에 기여함',
+    '공동체 속에서 자신의 역할을 먼저 찾고 끝까지 실천하려는 태도를 꾸준히 보임',
+    '학교생활 전반에서 책임 있는 자세와 배려의 태도를 안정적으로 실천함',
+    '공동체의 규칙을 존중하며 주변을 살피는 태도를 이어갈 것으로 기대됨',
   ]
 
   for (
@@ -280,7 +306,7 @@ function fitSelfGovernmentRecordLength(text) {
     index < additions.length;
     index += 1
   ) {
-    const nextText = `${fittedText} ${additions[index]}`.trim()
+    const nextText = fittedText.replace(/[.!?。]$/u, `, ${additions[index]}.`)
 
     if (getRecordTextLength(nextText) <= SELF_GOVERNMENT_MAX_LENGTH) {
       fittedText = nextText
@@ -288,9 +314,9 @@ function fitSelfGovernmentRecordLength(text) {
   }
 
   const shortAdditions = [
-    '이를 꾸준히 실천함.',
-    '배운 점을 생활 속에 적용함.',
-    '공동체 안에서 성장함.',
+    '이를 꾸준히 실천함',
+    '배운 점을 생활 속에 적용함',
+    '공동체 안에서 성장함',
   ]
 
   for (
@@ -299,7 +325,7 @@ function fitSelfGovernmentRecordLength(text) {
     index < shortAdditions.length;
     index += 1
   ) {
-    const nextText = `${fittedText} ${shortAdditions[index]}`.trim()
+    const nextText = fittedText.replace(/[.!?。]$/u, `, ${shortAdditions[index]}.`)
 
     if (getRecordTextLength(nextText) <= SELF_GOVERNMENT_MAX_LENGTH) {
       fittedText = nextText
@@ -326,35 +352,43 @@ function fitSelfGovernmentRecordLength(text) {
 }
 
 function buildSelfGovernmentFallbackRecord(selectedActivityRows, schoolLifeQualities) {
-  const activities = selectedActivityRows.length
-    ? selectedActivityRows
-    : [
-        { date: '2026.03.13.', content: '학급자치활동 조직' },
-        { date: '2026.04.01.', content: '체험활동 안전교육' },
-        { date: '2026.05.11.', content: '장애인식개선교육' },
-      ]
+  const activities = sortActivityRowsByDate(
+    selectedActivityRows.length
+      ? selectedActivityRows
+      : [
+          { date: '2026.03.13.', content: '학급자치활동 조직' },
+          { date: '2026.04.01.', content: '체험활동 안전교육' },
+          { date: '2026.05.11.', content: '장애인식개선교육' },
+        ],
+  )
   const qualityWords = getRandomQualityWords(schoolLifeQualities)
   const qualityA = qualityWords[0] ?? '책임감'
   const qualityB = qualityWords[1] ?? '배려심'
   const qualityC = qualityWords[2] ?? '의사소통'
   const qualityD = qualityWords[3] ?? '공동체 의식'
-  const sentenceTemplates = [
-    (activity) =>
-      `${formatActivityForRecordSentence(activity)}에서 ${qualityA} 있는 태도로 맡은 역할을 수행하고 학급 구성원을 살피며 활동에 참여함.`,
-    (activity) =>
-      `${formatActivityForRecordSentence(activity)}을 통해 ${qualityB}을 실천하며 친구들의 의견을 존중하고 공동체 생활에 필요한 기본 태도를 익힘.`,
-    (activity) =>
-      `${formatActivityForRecordSentence(activity)} 과정에서 ${qualityC}을 바탕으로 생각을 분명히 표현하고 안전하고 평화로운 학교생활의 중요성을 이해함.`,
-    (activity) =>
-      `${formatActivityForRecordSentence(activity)}에 참여하며 ${qualityD}을 기르고 주변 상황을 살피며 책임 있게 행동하려는 자세를 보임.`,
+  const firstActivity = activities[0]
+  const secondActivity = activities[1]
+  const thirdActivity = activities[2]
+  const fourthActivity = activities[3]
+  const firstSentence = [
+    firstActivity
+      ? `${formatActivityForRecordSentence(firstActivity)}에서 ${qualityA} 있는 태도로 학급 구성원을 살피며 맡은 역할을 수행하고`
+      : '',
+    secondActivity
+      ? `${formatActivityForRecordSentence(secondActivity)}을 통해 ${qualityB}을 실천하며 친구들의 의견을 존중하는 태도를 익혔으며`
+      : '',
+    thirdActivity
+      ? `${formatActivityForRecordSentence(thirdActivity)} 과정에서는 ${qualityC}을 바탕으로 자신의 생각을 분명히 표현하고 안전하고 평화로운 학교생활의 중요성을 이해함`
+      : '',
   ]
-  const activitySentences = activities.map((activity, index) =>
-    sentenceTemplates[index % sentenceTemplates.length](activity),
-  )
-  const summarySentence = `여러 자율자치 활동을 통해 배운 내용을 학교생활 속에서 실천하려 노력하며, 친구들과 협력하고 서로의 입장을 존중하는 태도를 꾸준히 확장해 감.`
+    .filter(Boolean)
+    .join(', ')
+  const secondSentence = fourthActivity
+    ? `${formatActivityForRecordSentence(fourthActivity)}에 참여하며 ${qualityD}을 기르고 주변 상황을 책임 있게 살피려는 자세를 보였고, 여러 자율자치 활동에서 배운 내용을 생활 속에서 실천하며 서로의 입장을 존중하는 태도를 꾸준히 확장해 긍정적인 학급 분위기 형성에 기여함.`
+    : `이러한 경험을 바탕으로 학교생활 속에서 필요한 도움을 먼저 찾고 친구들과 협력하며, 자신의 의견을 명확히 표현하되 다른 의견도 존중하는 태도를 꾸준히 확장해 긍정적인 학급 분위기 형성에 기여함.`
 
   return fitSelfGovernmentRecordLength(
-    [...activitySentences, summarySentence].join(' '),
+    `${firstSentence}. ${secondSentence}`,
   )
 }
 
@@ -378,7 +412,10 @@ function SchoolLifeRecordsInput({
     selectedStudent,
   )
   const activityText = activityTextsByClass[classActivityKey] ?? ''
-  const activityRows = useMemo(() => parseActivityRows(activityText), [activityText])
+  const activityRows = useMemo(
+    () => sortActivityRowsByDate(parseActivityRows(activityText)),
+    [activityText],
+  )
   const classLabel =
     selectedGrade || selectedClass
       ? `${selectedGrade || selectedStudent?.grade || ''}학년 ${
@@ -456,10 +493,13 @@ function SchoolLifeRecordsInput({
         ? '아래에서 랜덤 선택된 자율자치 활동 3~4개만 활용하고, 출력은 반드시 활동내용(실시일) 형식을 문장 안에 넣어 이어 쓰세요. 예: 학교폭력 예방교육(2026.03.11.)을 통해 타인의 입장을 이해하고 갈등을 평화롭게 해결하는 방법을 배움.'
         : '관찰 가능한 행동과 태도 중심으로 작성하세요.',
       isSelfGovernmentSection
+        ? '활동은 제공된 순서인 날짜순으로 서술하고, 활동마다 문장을 끊지 말고 쉼표와 ~며, ~고, ~하여 같은 연결어미로 자연스럽게 이어 쓰세요.'
+        : '',
+      isSelfGovernmentSection
         ? '학생역량과 품성 단어를 그대로 나열하지 말고, 각 활동에서 보인 태도와 배운 점 속에 자연스럽고 랜덤하게 섞어 표현하세요.'
         : '',
       isSelfGovernmentSection
-        ? '입력된 활동자료 밖의 활동은 새로 만들지 말고, 모든 문장은 마침표로 끝나게 작성하세요.'
+        ? '입력된 활동자료 밖의 활동은 새로 만들지 말고, 전체 문장은 2~3개의 긴 문장으로 구성해 마침표가 지나치게 많아지지 않게 하세요.'
         : '',
       `학생 구분: ${studentContext}`,
       qualityContext.length
