@@ -74,6 +74,17 @@ function parseActivityRows(text) {
     })
     .map((line) => {
       const cleanedLine = line.replace(/^[\s*ㆍ•-]+/, '').trim()
+      const fullDateMatch = cleanedLine.match(
+        /^(\d{4}[./-]\d{1,2}[./-]\d{1,2}\.?)\s*(?:[-–—|/:：\t]+)?\s*(.+)$/u,
+      )
+
+      if (fullDateMatch) {
+        return {
+          date: fullDateMatch[1],
+          content: fullDateMatch[2].trim(),
+        }
+      }
+
       const koreanDateMatch = cleanedLine.match(
         /^(\d{1,2}\s*월\s*\d{1,2}\s*일)\s*(?:[-–—|/:：\t]+)?\s*(.+)$/u,
       )
@@ -142,6 +153,21 @@ function cleanGeneratedRecordText(text) {
     .replace(/[`#]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function isLikelyKoreanRecordText(text) {
+  const koreanCount = text.match(/[가-힣]/g)?.length ?? 0
+  const latinCount = text.match(/[A-Za-z]/g)?.length ?? 0
+  const hasInstructionLeak =
+    /\b(showing|conclude|conclusion|write|student|record|activity|empathy|kindness|conflict|resolution|politeness|March|semester)\b/i.test(
+      text,
+    )
+
+  return (
+    koreanCount >= 20 &&
+    latinCount <= Math.max(12, Math.floor(koreanCount * 0.08)) &&
+    !hasInstructionLeak
+  )
 }
 
 function SchoolLifeRecordsInput({
@@ -239,10 +265,13 @@ function SchoolLifeRecordsInput({
         ? '한 문단으로 400~450자 정도 작성하고 반드시 500자 미만으로 완결된 문장으로 마무리하세요.'
         : '관찰 가능한 행동 중심으로 자연스럽게 2문장, 180자 이내로 작성하세요.',
       isSelfGovernmentSection
-        ? '날짜를 모두 나열하지 말고 주요 활동을 자연스럽게 엮어 학생의 태도와 성장 중심으로 작성하세요.'
+        ? '출력은 반드시 활동명(실시일) 형식을 문장 안에 넣어 이어 쓰세요. 예: 학교폭력 예방교육(2024.03.06.)을 통해 타인의 입장을 이해하고 갈등을 평화롭게 해결하는 방법을 배움.'
         : '관찰 가능한 행동과 태도 중심으로 작성하세요.',
       isSelfGovernmentSection
-        ? '활동자료의 날짜와 활동명은 한국어 표현 그대로 참고하고 March, New semester 같은 영어 표현으로 바꾸지 마세요.'
+        ? '활동자료에 연도가 있는 날짜는 그대로 쓰고, 연도가 없는 날짜는 3월 10일처럼 입력된 한국어 날짜 그대로 쓰세요. March, New semester 같은 영어 표현으로 바꾸지 마세요.'
+        : '',
+      isSelfGovernmentSection
+        ? '각 문장은 활동을 통해 배운 점, 실천한 태도, 학생역량과 품성이 드러나게 작성하세요. 입력된 활동자료 밖의 활동은 새로 만들지 마세요.'
         : '',
       `학생 구분: ${studentContext}`,
       qualityContext.length
@@ -289,7 +318,15 @@ function SchoolLifeRecordsInput({
         throw new Error(data?.error ?? 'Gemini 응답을 불러오지 못했습니다.')
       }
 
-      updateRecordValue(section.id, cleanGeneratedRecordText(data.text))
+      const generatedText = cleanGeneratedRecordText(data.text)
+
+      if (!isLikelyKoreanRecordText(generatedText)) {
+        throw new Error(
+          '한국어 생활기록부 문장으로 생성되지 않았습니다. 다시 Gemini 생성을 눌러 주세요.',
+        )
+      }
+
+      updateRecordValue(section.id, generatedText)
       onToast?.(`${selectedStudent.name} 학생의 ${section.label} 문장을 생성했습니다.`)
     } catch (error) {
       onToast?.(
