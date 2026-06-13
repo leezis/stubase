@@ -23,6 +23,78 @@ const PAGE_SIZE = 20
 const COUNSELING_COUNT_PAGE_SIZE = 1000
 const APP_BUILD_LABEL = 'build 2026-04-21 b1'
 const PRODUCTION_SITE_URL = 'https://stubase.pages.dev/'
+const SCHOOL_LIFE_RECORDS_MODULE_ID = 'school-life-records-input'
+
+const STUDENT_COMPETENCY_OPTIONS = [
+  '의사소통',
+  '협업',
+  '자기관리',
+  '문제해결',
+  '창의적 사고',
+  '비판적 사고',
+  '정보활용',
+  '진로탐색',
+  '학습주도성',
+  '갈등조정',
+  '의사결정',
+  '탐구력',
+  '실행력',
+  '적응력',
+  '표현력',
+]
+
+const STUDENT_CHARACTER_OPTIONS = [
+  '성실함',
+  '배려심',
+  '존중',
+  '책임감',
+  '정직함',
+  '예의',
+  '공감',
+  '끈기',
+  '나눔',
+  '긍정성',
+  '인내심',
+  '질서의식',
+  '친절함',
+  '신뢰감',
+  '봉사정신',
+]
+
+const SCHOOL_LIFE_QUALITY_GROUPS = [
+  {
+    id: 'competencies',
+    label: '학생역량',
+    options: STUDENT_COMPETENCY_OPTIONS,
+  },
+  {
+    id: 'characters',
+    label: '품성',
+    options: STUDENT_CHARACTER_OPTIONS,
+  },
+]
+
+const emptySchoolLifeQualitySelection = {
+  competencies: [],
+  characters: [],
+}
+
+function getRandomQualityOptions(options, minCount = 3, maxCount = 5) {
+  const shuffledOptions = [...options]
+
+  for (let index = shuffledOptions.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1))
+    ;[shuffledOptions[index], shuffledOptions[randomIndex]] = [
+      shuffledOptions[randomIndex],
+      shuffledOptions[index],
+    ]
+  }
+
+  const count =
+    Math.floor(Math.random() * (maxCount - minCount + 1)) + minCount
+
+  return shuffledOptions.slice(0, Math.min(count, shuffledOptions.length))
+}
 
 const emergencyContactsModule = {
   id: 'emergency-contacts',
@@ -36,7 +108,7 @@ const emergencyContactsModule = {
 }
 
 const schoolLifeRecordsInputModule = {
-  id: 'school-life-records-input',
+  id: SCHOOL_LIFE_RECORDS_MODULE_ID,
   category: 'school-work',
   menu: {
     icon: '생',
@@ -350,6 +422,8 @@ function App() {
   const [schoolWorkSelectedStudentIds, setSchoolWorkSelectedStudentIds] =
     useState({})
   const [schoolWorkHeaderActions, setSchoolWorkHeaderActions] = useState(null)
+  const [schoolLifeQualitySelections, setSchoolLifeQualitySelections] =
+    useState({})
   const [toastMessage, setToastMessage] = useState('')
   const [toastTone, setToastTone] = useState('info')
 
@@ -379,6 +453,12 @@ function App() {
   const activeWorkspaceSelectedStudentId = isSchoolWorkStudentWorkspaceView
     ? activeSchoolWorkSelectedStudentId
     : selectedStudentId
+  const isSchoolLifeRecordsInputView =
+    activeSchoolWorkModule?.id === SCHOOL_LIFE_RECORDS_MODULE_ID
+  const activeSchoolLifeQualitySelection = activeWorkspaceSelectedStudentId
+    ? schoolLifeQualitySelections[activeWorkspaceSelectedStudentId] ??
+      emptySchoolLifeQualitySelection
+    : emptySchoolLifeQualitySelection
   const activeSchoolWorkDefaultFilters =
     activeSchoolWorkModule?.studentWorkspace?.defaultFilters ??
     emptyStudentWorkspaceFilters
@@ -488,6 +568,51 @@ function App() {
     if (message) {
       showToast(message, 'error')
     }
+  }
+
+  function toggleSchoolLifeQualitySelection(groupId, option) {
+    const studentId = activeWorkspaceSelectedStudentId
+
+    if (!studentId) {
+      return
+    }
+
+    setSchoolLifeQualitySelections((previous) => {
+      const current = previous[studentId] ?? emptySchoolLifeQualitySelection
+      const currentValues = current[groupId] ?? []
+      const nextValues = currentValues.includes(option)
+        ? currentValues.filter((value) => value !== option)
+        : [...currentValues, option]
+
+      return {
+        ...previous,
+        [studentId]: {
+          ...emptySchoolLifeQualitySelection,
+          ...current,
+          [groupId]: nextValues,
+        },
+      }
+    })
+  }
+
+  function handleRandomSelectSchoolLifeQualities() {
+    const studentId = activeWorkspaceSelectedStudentId
+
+    if (!studentId) {
+      return
+    }
+
+    setSchoolLifeQualitySelections((previous) => ({
+      ...previous,
+      [studentId]: {
+        competencies: getRandomQualityOptions(STUDENT_COMPETENCY_OPTIONS),
+        characters: getRandomQualityOptions(STUDENT_CHARACTER_OPTIONS),
+      },
+    }))
+
+    showToast(
+      `${activeWorkspaceSelectedStudent?.name ?? '학생'} 학생의 역량과 품성을 랜덤 선택했습니다.`,
+    )
   }
 
   function clearActiveWorkspaceSelectedStudent() {
@@ -2344,6 +2469,50 @@ function App() {
                           {activeWorkspaceSelectedStudent.student_num}번{' '}
                           {activeWorkspaceSelectedStudent.name}
                         </h2>
+                        {isSchoolLifeRecordsInputView ? (
+                          <div
+                            className="student-quality-picker"
+                            aria-label="학생역량과 품성 선택"
+                          >
+                            {SCHOOL_LIFE_QUALITY_GROUPS.map((group) => (
+                              <div
+                                className="student-quality-picker__group"
+                                key={group.id}
+                              >
+                                <span className="student-quality-picker__label">
+                                  {group.label}
+                                </span>
+                                <div className="student-quality-picker__options">
+                                  {group.options.map((option) => {
+                                    const isSelected =
+                                      activeSchoolLifeQualitySelection[
+                                        group.id
+                                      ]?.includes(option) ?? false
+
+                                    return (
+                                      <button
+                                        className={`student-quality-picker__button student-quality-picker__button--${group.id} ${
+                                          isSelected ? 'is-selected' : ''
+                                        }`}
+                                        type="button"
+                                        key={option}
+                                        aria-pressed={isSelected}
+                                        onClick={() =>
+                                          toggleSchoolLifeQualitySelection(
+                                            group.id,
+                                            option,
+                                          )
+                                        }
+                                      >
+                                        {option}
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 
@@ -2360,6 +2529,14 @@ function App() {
                       ) : null}
                       {schoolWorkHeaderActions ? (
                         schoolWorkHeaderActions
+                      ) : isSchoolLifeRecordsInputView ? (
+                        <button
+                          className="ghost-button"
+                          type="button"
+                          onClick={handleRandomSelectSchoolLifeQualities}
+                        >
+                          랜덤선택
+                        </button>
                       ) : (
                         <button
                           className="ghost-button"
@@ -2396,6 +2573,7 @@ function App() {
                       dataRefreshKey={activeSchoolWorkDataRefreshKey}
                       onHeaderActionsChange={setSchoolWorkHeaderActions}
                       onToast={showToast}
+                      schoolLifeQualities={activeSchoolLifeQualitySelection}
                       selectedClass={activeSelectedClass}
                       selectedGrade={activeSelectedGrade}
                       selectedStudent={activeWorkspaceSelectedStudent}
