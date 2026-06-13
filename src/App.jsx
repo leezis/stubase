@@ -6,6 +6,7 @@ import CounselingForm, {
 import Dashboard from './features/dashboard/Dashboard.jsx'
 import EmergencyContacts from './features/emergency-contacts/EmergencyContacts.jsx'
 import personalGradeRecordsModule from './features/personal-grade-records/index.js'
+import SchoolLifeRecordsInput from './features/school-life-records/SchoolLifeRecordsInput.jsx'
 import Login from './features/auth/Login.jsx'
 import './App.css'
 import {
@@ -34,9 +35,40 @@ const emergencyContactsModule = {
   Component: EmergencyContacts,
 }
 
+const schoolLifeRecordsInputModule = {
+  id: 'school-life-records-input',
+  category: 'school-work',
+  menu: {
+    icon: '생',
+    title: '학교생활기록부 입력',
+    description: '학생별 생활기록부 입력 화면',
+  },
+  usesStudentWorkspace: true,
+  studentWorkspace: {
+    hero: {
+      badge: 'School Work',
+      title: '학급별 학교생활기록부 입력을 한 화면에서 진행해요',
+      description: '학급 선택 후 학생 목록과 입력 영역을 함께 확인하며 기록을 작성합니다.',
+    },
+    studentBadge: '입력',
+    defaultFilters: {
+      selectedGrade: '1',
+      selectedClass: '1',
+    },
+    autoSelectFirstStudent: true,
+    emptyState: {
+      icon: '생',
+      title: '학생을 선택하면 학교생활기록부 입력 화면이 열립니다',
+      description: '왼쪽 학생 목록에서 학생을 선택해 주세요.',
+    },
+  },
+  Component: SchoolLifeRecordsInput,
+}
+
 const SCHOOL_WORK_MODULES = [
   emergencyContactsModule,
   personalGradeRecordsModule,
+  schoolLifeRecordsInputModule,
 ]
 
 const emptyStudentWorkspaceFilters = {
@@ -329,8 +361,6 @@ function App() {
   const activeSchoolWorkModule = SCHOOL_WORK_MODULES.find(
     (module) => module.id === activeView,
   )
-  const isPersonalGradeRecordsView =
-    activeSchoolWorkModule?.id === personalGradeRecordsModule.id
   const ActiveSchoolWorkModule = activeSchoolWorkModule?.Component ?? null
   const ActiveStudentWorkspaceHeaderActions =
     activeSchoolWorkModule?.studentWorkspace?.HeaderActions ?? null
@@ -474,6 +504,7 @@ function App() {
     setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
+    setSchoolWorkHeaderActions(null)
   }
 
   function handleOpenCounselingView() {
@@ -483,6 +514,7 @@ function App() {
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
     setExpandedCounselingRecordId(null)
+    setSchoolWorkHeaderActions(null)
 
     if (nextStudent) {
       setSelectedStudent(nextStudent)
@@ -497,6 +529,7 @@ function App() {
     setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
+    setSchoolWorkHeaderActions(null)
   }
 
   function handleOpenStudentFormView() {
@@ -504,6 +537,7 @@ function App() {
     setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
+    setSchoolWorkHeaderActions(null)
   }
 
   function handleOpenBatchUploadView() {
@@ -511,6 +545,7 @@ function App() {
     setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
+    setSchoolWorkHeaderActions(null)
   }
 
   function handleOpenSchoolWorkModule(moduleId) {
@@ -543,6 +578,7 @@ function App() {
     setIsStudentDetailScrollPending(false)
     setIsManagementMenuOpen(false)
     setIsSchoolWorkMenuOpen(false)
+    setSchoolWorkHeaderActions(null)
 
     if (!nextModule?.usesStudentWorkspace) {
       return
@@ -1394,6 +1430,15 @@ function App() {
     )
   })
 
+  const runAutoSelectFirstSchoolWorkStudent = useEffectEvent(
+    (moduleId, studentId) => {
+      setSchoolWorkSelectedStudentIds((previous) => ({
+        ...previous,
+        [moduleId]: studentId,
+      }))
+    },
+  )
+
   useEffect(() => {
     if (!students.length) {
       return
@@ -1407,6 +1452,48 @@ function App() {
       window.clearTimeout(timeoutId)
     }
   }, [students])
+
+  useEffect(() => {
+    const moduleId = activeSchoolWorkModule?.id
+
+    if (
+      !moduleId ||
+      !isSchoolWorkStudentWorkspaceView ||
+      !activeSchoolWorkModule?.studentWorkspace?.autoSelectFirstStudent ||
+      activeSchoolWorkSelectedStudentId ||
+      !students.length
+    ) {
+      return
+    }
+
+    const nextStudent = students.find((student) => {
+      const gradeMatches =
+        !activeSelectedGrade || String(student.grade) === activeSelectedGrade
+      const classMatches =
+        !activeSelectedClass || String(student.class_num) === activeSelectedClass
+
+      return gradeMatches && classMatches
+    })
+
+    if (!nextStudent) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      runAutoSelectFirstSchoolWorkStudent(moduleId, nextStudent.id)
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [
+    activeSchoolWorkModule,
+    activeSchoolWorkSelectedStudentId,
+    activeSelectedClass,
+    activeSelectedGrade,
+    isSchoolWorkStudentWorkspaceView,
+    students,
+  ])
 
   const runStudentQueryReset = useEffectEvent(() => {
     void loadStudents({ reset: true })
@@ -2271,7 +2358,7 @@ function App() {
                           {isUploadingAvatar ? '업로드 중...' : '📷 카메라'}
                         </button>
                       ) : null}
-                      {isPersonalGradeRecordsView ? (
+                      {schoolWorkHeaderActions ? (
                         schoolWorkHeaderActions
                       ) : (
                         <button
@@ -2312,6 +2399,7 @@ function App() {
                       selectedClass={activeSelectedClass}
                       selectedGrade={activeSelectedGrade}
                       selectedStudent={activeWorkspaceSelectedStudent}
+                      students={students}
                     />
                   ) : null}
                 </>
@@ -2513,7 +2601,7 @@ function App() {
                 role="menu"
                 aria-label="학교업무 메뉴"
               >
-                <div className="app-header__mega-menu-grid app-header__mega-menu-grid--single">
+                <div className="app-header__mega-menu-grid">
                   {SCHOOL_WORK_MODULES.map((module) => (
                     <button
                       className="app-header__mega-item"
@@ -2582,4 +2670,3 @@ function App() {
 }
 
 export default App
-

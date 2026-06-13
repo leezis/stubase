@@ -216,7 +216,7 @@
 }
 
 .app-header__mega-menu--compact {
-  width: min(380px, calc(100vw - 80px));
+  width: min(640px, calc(100vw - 80px));
 }
 
 .app-header__mega-menu-grid--single {
