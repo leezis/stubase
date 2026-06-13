@@ -3,6 +3,9 @@ import './SchoolLifeRecordsInput.css'
 
 const SELF_GOVERNMENT_SECTION_ID = 'self-government'
 const ACTIVITY_STORAGE_KEY = 'dsy-school-life-self-government-activities-v1'
+const DEFAULT_ACTIVITY_YEAR = '2026'
+const SELF_GOVERNMENT_MIN_LENGTH = 400
+const SELF_GOVERNMENT_MAX_LENGTH = 450
 
 const emptySchoolLifeQualities = {
   competencies: [],
@@ -129,8 +132,62 @@ function parseActivityRows(text) {
 
 function formatActivityRowsForPrompt(activityRows) {
   return activityRows
-    .map((row) => (row.date ? `${row.date} - ${row.content}` : row.content))
+    .map((row) => {
+      const recordDate = formatDateForRecord(row.date)
+      return recordDate ? `${row.content}(${recordDate})` : row.content
+    })
     .join('\n')
+}
+
+function formatDateForRecord(date) {
+  const trimmedDate = String(date ?? '').trim()
+
+  if (!trimmedDate) {
+    return ''
+  }
+
+  const fullDateMatch = trimmedDate.match(
+    /^(\d{4})[./-](\d{1,2})[./-](\d{1,2})\.?$/u,
+  )
+
+  if (fullDateMatch) {
+    return `${fullDateMatch[1]}.${fullDateMatch[2].padStart(2, '0')}.${fullDateMatch[3].padStart(2, '0')}.`
+  }
+
+  const koreanDateMatch = trimmedDate.match(/^(\d{1,2})\s*월\s*(\d{1,2})\s*일$/u)
+
+  if (koreanDateMatch) {
+    return `${DEFAULT_ACTIVITY_YEAR}.${koreanDateMatch[1].padStart(2, '0')}.${koreanDateMatch[2].padStart(2, '0')}.`
+  }
+
+  const shortDateMatch = trimmedDate.match(/^(\d{1,2})[./-](\d{1,2})\.?$/u)
+
+  if (shortDateMatch) {
+    return `${DEFAULT_ACTIVITY_YEAR}.${shortDateMatch[1].padStart(2, '0')}.${shortDateMatch[2].padStart(2, '0')}.`
+  }
+
+  return trimmedDate
+}
+
+function getRandomActivityRows(activityRows, minCount = 3, maxCount = 4) {
+  if (!activityRows.length) {
+    return []
+  }
+
+  const shuffledRows = [...activityRows]
+
+  for (let index = shuffledRows.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1))
+    ;[shuffledRows[index], shuffledRows[randomIndex]] = [
+      shuffledRows[randomIndex],
+      shuffledRows[index],
+    ]
+  }
+
+  const targetCount =
+    Math.floor(Math.random() * (maxCount - minCount + 1)) + minCount
+
+  return shuffledRows.slice(0, Math.min(targetCount, shuffledRows.length))
 }
 
 function cleanGeneratedRecordText(text) {
@@ -155,17 +212,32 @@ function cleanGeneratedRecordText(text) {
     .trim()
 }
 
-function isLikelyKoreanRecordText(text) {
+function getRecordTextLength(text) {
+  return Array.from(String(text ?? '')).length
+}
+
+function isWithinSelfGovernmentLength(text) {
+  const textLength = getRecordTextLength(text)
+  return (
+    textLength >= SELF_GOVERNMENT_MIN_LENGTH &&
+    textLength <= SELF_GOVERNMENT_MAX_LENGTH
+  )
+}
+
+function isLikelyKoreanRecordText(text, shouldBeLong = false) {
   const koreanCount = text.match(/[가-힣]/g)?.length ?? 0
   const latinCount = text.match(/[A-Za-z]/g)?.length ?? 0
+  const hasCompleteEnding = /[.!?。]$/u.test(text.trim())
   const hasInstructionLeak =
     /\b(showing|conclude|conclusion|write|student|record|activity|empathy|kindness|conflict|resolution|politeness|March|semester)\b/i.test(
       text,
     )
 
   return (
+    (!shouldBeLong || isWithinSelfGovernmentLength(text)) &&
     koreanCount >= 20 &&
     latinCount <= Math.max(12, Math.floor(koreanCount * 0.08)) &&
+    hasCompleteEnding &&
     !hasInstructionLeak
   )
 }
@@ -253,8 +325,11 @@ function SchoolLifeRecordsInput({
         : '',
       selectedCharacters.length ? `품성: ${selectedCharacters.join(', ')}` : '',
     ].filter(Boolean)
-    const activityContext = formatActivityRowsForPrompt(activityRows)
     const isSelfGovernmentSection = section.id === SELF_GOVERNMENT_SECTION_ID
+    const selectedActivityRows = isSelfGovernmentSection
+      ? getRandomActivityRows(activityRows)
+      : []
+    const activityContext = formatActivityRowsForPrompt(selectedActivityRows)
 
     return [
       section.promptGuide,
@@ -262,23 +337,23 @@ function SchoolLifeRecordsInput({
       '영어 번역, 제목, 설명, 번호, 목록, 불릿, 마크다운 기호(*, **, #, -), 따옴표를 절대 쓰지 마세요.',
       '학생 이름은 넣지 말고, 과장된 표현은 피해 주세요.',
       isSelfGovernmentSection
-        ? '한 문단으로 400~450자 정도 작성하고 반드시 500자 미만으로 완결된 문장으로 마무리하세요.'
+        ? '한 문단으로 작성하고 최종 출력은 공백 포함 반드시 400자 이상 450자 이하로 맞추세요. 399자 이하는 실패이고 451자 이상도 실패입니다.'
         : '관찰 가능한 행동 중심으로 자연스럽게 2문장, 180자 이내로 작성하세요.',
       isSelfGovernmentSection
-        ? '출력은 반드시 활동명(실시일) 형식을 문장 안에 넣어 이어 쓰세요. 예: 학교폭력 예방교육(2024.03.06.)을 통해 타인의 입장을 이해하고 갈등을 평화롭게 해결하는 방법을 배움.'
+        ? '아래에서 랜덤 선택된 자율자치 활동 3~4개만 활용하고, 출력은 반드시 활동내용(실시일) 형식을 문장 안에 넣어 이어 쓰세요. 예: 학교폭력 예방교육(2026.03.11.)을 통해 타인의 입장을 이해하고 갈등을 평화롭게 해결하는 방법을 배움.'
         : '관찰 가능한 행동과 태도 중심으로 작성하세요.',
       isSelfGovernmentSection
-        ? '활동자료에 연도가 있는 날짜는 그대로 쓰고, 연도가 없는 날짜는 3월 10일처럼 입력된 한국어 날짜 그대로 쓰세요. March, New semester 같은 영어 표현으로 바꾸지 마세요.'
+        ? '학생역량과 품성 단어를 그대로 나열하지 말고, 각 활동에서 보인 태도와 배운 점 속에 자연스럽고 랜덤하게 섞어 표현하세요.'
         : '',
       isSelfGovernmentSection
-        ? '각 문장은 활동을 통해 배운 점, 실천한 태도, 학생역량과 품성이 드러나게 작성하세요. 입력된 활동자료 밖의 활동은 새로 만들지 마세요.'
+        ? '입력된 활동자료 밖의 활동은 새로 만들지 말고, 모든 문장은 마침표로 끝나게 작성하세요.'
         : '',
       `학생 구분: ${studentContext}`,
       qualityContext.length
         ? `반영할 학생 특성: ${qualityContext.join(' / ')}`
         : '반영할 학생 특성: 선택된 항목이 없으면 참고 메모 중심으로 작성',
       isSelfGovernmentSection && activityContext
-        ? `[자율자치 활동자료]\n${activityContext}`
+        ? `[이번 생성에 사용할 랜덤 선택 자율자치 활동자료]\n${activityContext}`
         : '',
       memo ? `참고 메모: ${memo}` : `참고 메모: ${section.fallbackMemo}`,
     ]
@@ -320,9 +395,19 @@ function SchoolLifeRecordsInput({
 
       const generatedText = cleanGeneratedRecordText(data.text)
 
-      if (!isLikelyKoreanRecordText(generatedText)) {
+      if (
+        !isLikelyKoreanRecordText(
+          generatedText,
+          section.id === SELF_GOVERNMENT_SECTION_ID,
+        )
+      ) {
+        const lengthMessage =
+          section.id === SELF_GOVERNMENT_SECTION_ID
+            ? ` 현재 ${getRecordTextLength(generatedText)}자입니다.`
+            : ''
+
         throw new Error(
-          '한국어 생활기록부 문장으로 생성되지 않았습니다. 다시 Gemini 생성을 눌러 주세요.',
+          `한국어 생활기록부 문장으로 생성되지 않았거나 400~450자 범위를 벗어났습니다.${lengthMessage} 다시 Gemini 생성을 눌러 주세요.`,
         )
       }
 
@@ -416,6 +501,11 @@ function SchoolLifeRecordsInput({
                   {selectedStudent.name} {section.label}
                 </span>
                 <textarea
+                  maxLength={
+                    section.id === SELF_GOVERNMENT_SECTION_ID
+                      ? SELF_GOVERNMENT_MAX_LENGTH
+                      : undefined
+                  }
                   value={recordValues[recordKey] ?? ''}
                   onChange={(event) =>
                     updateRecordValue(section.id, event.target.value)
