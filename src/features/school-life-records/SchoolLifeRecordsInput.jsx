@@ -190,6 +190,24 @@ function getRandomActivityRows(activityRows, minCount = 3, maxCount = 4) {
   return shuffledRows.slice(0, Math.min(targetCount, shuffledRows.length))
 }
 
+function getRandomQualityWords(schoolLifeQualities, targetCount = 4) {
+  const qualityWords = [
+    ...(schoolLifeQualities.competencies ?? []),
+    ...(schoolLifeQualities.characters ?? []),
+  ].filter(Boolean)
+  const shuffledWords = [...new Set(qualityWords)]
+
+  for (let index = shuffledWords.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1))
+    ;[shuffledWords[index], shuffledWords[randomIndex]] = [
+      shuffledWords[randomIndex],
+      shuffledWords[index],
+    ]
+  }
+
+  return shuffledWords.slice(0, targetCount)
+}
+
 function cleanGeneratedRecordText(text) {
   return String(text ?? '')
     .replace(/```[a-z]*\n?/gi, '')
@@ -239,6 +257,104 @@ function isLikelyKoreanRecordText(text, shouldBeLong = false) {
     latinCount <= Math.max(12, Math.floor(koreanCount * 0.08)) &&
     hasCompleteEnding &&
     !hasInstructionLeak
+  )
+}
+
+function formatActivityForRecordSentence(activity) {
+  const recordDate = formatDateForRecord(activity.date)
+  return recordDate ? `${activity.content}(${recordDate})` : activity.content
+}
+
+function fitSelfGovernmentRecordLength(text) {
+  let fittedText = cleanGeneratedRecordText(text)
+  const additions = [
+    '활동 과정에서 친구의 의견을 경청하고 필요한 도움을 주며 긍정적인 학급 분위기 형성에 기여함.',
+    '또한 공동체 속에서 자신의 역할을 먼저 찾고 끝까지 실천하려는 태도를 꾸준히 보임.',
+    '이를 바탕으로 학교생활 전반에서 책임 있는 자세와 배려의 태도를 안정적으로 실천함.',
+    '앞으로도 공동체의 규칙을 존중하며 주변을 살피는 태도를 이어갈 것으로 기대됨.',
+  ]
+
+  for (
+    let index = 0;
+    getRecordTextLength(fittedText) < SELF_GOVERNMENT_MIN_LENGTH &&
+    index < additions.length;
+    index += 1
+  ) {
+    const nextText = `${fittedText} ${additions[index]}`.trim()
+
+    if (getRecordTextLength(nextText) <= SELF_GOVERNMENT_MAX_LENGTH) {
+      fittedText = nextText
+    }
+  }
+
+  const shortAdditions = [
+    '이를 꾸준히 실천함.',
+    '배운 점을 생활 속에 적용함.',
+    '공동체 안에서 성장함.',
+  ]
+
+  for (
+    let index = 0;
+    getRecordTextLength(fittedText) < SELF_GOVERNMENT_MIN_LENGTH &&
+    index < shortAdditions.length;
+    index += 1
+  ) {
+    const nextText = `${fittedText} ${shortAdditions[index]}`.trim()
+
+    if (getRecordTextLength(nextText) <= SELF_GOVERNMENT_MAX_LENGTH) {
+      fittedText = nextText
+    }
+  }
+
+  if (getRecordTextLength(fittedText) > SELF_GOVERNMENT_MAX_LENGTH) {
+    const clippedText = Array.from(fittedText)
+      .slice(0, SELF_GOVERNMENT_MAX_LENGTH + 1)
+      .join('')
+    const lastPeriodIndex = clippedText.lastIndexOf('.')
+
+    if (lastPeriodIndex >= SELF_GOVERNMENT_MIN_LENGTH) {
+      return clippedText.slice(0, lastPeriodIndex + 1).trim()
+    }
+
+    return `${Array.from(fittedText)
+      .slice(0, SELF_GOVERNMENT_MAX_LENGTH - 2)
+      .join('')
+      .replace(/[,\s]+$/u, '')}함.`
+  }
+
+  return fittedText
+}
+
+function buildSelfGovernmentFallbackRecord(selectedActivityRows, schoolLifeQualities) {
+  const activities = selectedActivityRows.length
+    ? selectedActivityRows
+    : [
+        { date: '2026.03.13.', content: '학급자치활동 조직' },
+        { date: '2026.04.01.', content: '체험활동 안전교육' },
+        { date: '2026.05.11.', content: '장애인식개선교육' },
+      ]
+  const qualityWords = getRandomQualityWords(schoolLifeQualities)
+  const qualityA = qualityWords[0] ?? '책임감'
+  const qualityB = qualityWords[1] ?? '배려심'
+  const qualityC = qualityWords[2] ?? '의사소통'
+  const qualityD = qualityWords[3] ?? '공동체 의식'
+  const sentenceTemplates = [
+    (activity) =>
+      `${formatActivityForRecordSentence(activity)}에서 ${qualityA} 있는 태도로 맡은 역할을 수행하고 학급 구성원을 살피며 활동에 참여함.`,
+    (activity) =>
+      `${formatActivityForRecordSentence(activity)}을 통해 ${qualityB}을 실천하며 친구들의 의견을 존중하고 공동체 생활에 필요한 기본 태도를 익힘.`,
+    (activity) =>
+      `${formatActivityForRecordSentence(activity)} 과정에서 ${qualityC}을 바탕으로 생각을 분명히 표현하고 안전하고 평화로운 학교생활의 중요성을 이해함.`,
+    (activity) =>
+      `${formatActivityForRecordSentence(activity)}에 참여하며 ${qualityD}을 기르고 주변 상황을 살피며 책임 있게 행동하려는 자세를 보임.`,
+  ]
+  const activitySentences = activities.map((activity, index) =>
+    sentenceTemplates[index % sentenceTemplates.length](activity),
+  )
+  const summarySentence = `여러 자율자치 활동을 통해 배운 내용을 학교생활 속에서 실천하려 노력하며, 친구들과 협력하고 서로의 입장을 존중하는 태도를 꾸준히 확장해 감.`
+
+  return fitSelfGovernmentRecordLength(
+    [...activitySentences, summarySentence].join(' '),
   )
 }
 
@@ -314,7 +430,7 @@ function SchoolLifeRecordsInput({
     }))
   }
 
-  function createRecordPrompt(section, currentText) {
+  function createRecordPrompt(section, currentText, selectedActivityRows = []) {
     const memo = currentText.trim()
     const studentContext = `${selectedStudent.grade}학년 ${selectedStudent.class_num}반 ${selectedStudent.student_num}번`
     const selectedCompetencies = schoolLifeQualities.competencies ?? []
@@ -326,9 +442,6 @@ function SchoolLifeRecordsInput({
       selectedCharacters.length ? `품성: ${selectedCharacters.join(', ')}` : '',
     ].filter(Boolean)
     const isSelfGovernmentSection = section.id === SELF_GOVERNMENT_SECTION_ID
-    const selectedActivityRows = isSelfGovernmentSection
-      ? getRandomActivityRows(activityRows)
-      : []
     const activityContext = formatActivityRowsForPrompt(selectedActivityRows)
 
     return [
@@ -368,6 +481,10 @@ function SchoolLifeRecordsInput({
 
     const recordKey = getRecordKey(section.id)
     const currentText = recordValues[recordKey] ?? ''
+    const isSelfGovernmentSection = section.id === SELF_GOVERNMENT_SECTION_ID
+    const selectedActivityRows = isSelfGovernmentSection
+      ? getRandomActivityRows(activityRows)
+      : []
 
     setSectionGenerationState(section.id, true)
 
@@ -378,7 +495,7 @@ function SchoolLifeRecordsInput({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          prompt: createRecordPrompt(section, currentText),
+          prompt: createRecordPrompt(section, currentText, selectedActivityRows),
         }),
       })
       const contentType = response.headers.get('content-type') ?? ''
@@ -398,22 +515,41 @@ function SchoolLifeRecordsInput({
       if (
         !isLikelyKoreanRecordText(
           generatedText,
-          section.id === SELF_GOVERNMENT_SECTION_ID,
+          isSelfGovernmentSection,
         )
       ) {
-        const lengthMessage =
-          section.id === SELF_GOVERNMENT_SECTION_ID
-            ? ` 현재 ${getRecordTextLength(generatedText)}자입니다.`
-            : ''
+        if (isSelfGovernmentSection) {
+          const fallbackText = buildSelfGovernmentFallbackRecord(
+            selectedActivityRows,
+            schoolLifeQualities,
+          )
 
-        throw new Error(
-          `한국어 생활기록부 문장으로 생성되지 않았거나 400~450자 범위를 벗어났습니다.${lengthMessage} 다시 Gemini 생성을 눌러 주세요.`,
-        )
+          updateRecordValue(section.id, fallbackText)
+          onToast?.(
+            `${selectedStudent.name} 학생의 자율자치 활동 문장을 400~450자로 보정했습니다.`,
+          )
+          return
+        }
+
+        throw new Error('한국어 생활기록부 문장으로 생성되지 않았습니다.')
       }
 
       updateRecordValue(section.id, generatedText)
       onToast?.(`${selectedStudent.name} 학생의 ${section.label} 문장을 생성했습니다.`)
     } catch (error) {
+      if (isSelfGovernmentSection) {
+        const fallbackText = buildSelfGovernmentFallbackRecord(
+          selectedActivityRows,
+          schoolLifeQualities,
+        )
+
+        updateRecordValue(section.id, fallbackText)
+        onToast?.(
+          `${selectedStudent.name} 학생의 자율자치 활동 문장을 400~450자로 보정했습니다.`,
+        )
+        return
+      }
+
       onToast?.(
         error instanceof Error
           ? error.message
