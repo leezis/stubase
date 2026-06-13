@@ -122,6 +122,28 @@ function formatActivityRowsForPrompt(activityRows) {
     .join('\n')
 }
 
+function cleanGeneratedRecordText(text) {
+  return String(text ?? '')
+    .replace(/```[a-z]*\n?/gi, '')
+    .replace(/```/g, '')
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^#{1,6}\s*/u, '')
+        .replace(/^[-*ㆍ•]\s*/u, '')
+        .replace(/^\d+[.)]\s*/u, '')
+        .replace(/^\*\*(.+)\*\*$/u, '$1')
+        .trim(),
+    )
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\*\*/g, '')
+    .replace(/[`#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function SchoolLifeRecordsInput({
   onHeaderActionsChange,
   onToast,
@@ -210,13 +232,18 @@ function SchoolLifeRecordsInput({
 
     return [
       section.promptGuide,
+      '아래 조건을 반드시 지켜서 완성된 한국어 생활기록부 문장만 출력하세요.',
+      '영어 번역, 제목, 설명, 번호, 목록, 불릿, 마크다운 기호(*, **, #, -), 따옴표를 절대 쓰지 마세요.',
       '학생 이름은 넣지 말고, 과장된 표현은 피해 주세요.',
       isSelfGovernmentSection
-        ? '400~450자 정도로 작성하고 반드시 500자 미만으로 마무리하세요.'
+        ? '한 문단으로 400~450자 정도 작성하고 반드시 500자 미만으로 완결된 문장으로 마무리하세요.'
         : '관찰 가능한 행동 중심으로 자연스럽게 2문장, 180자 이내로 작성하세요.',
       isSelfGovernmentSection
         ? '날짜를 모두 나열하지 말고 주요 활동을 자연스럽게 엮어 학생의 태도와 성장 중심으로 작성하세요.'
         : '관찰 가능한 행동과 태도 중심으로 작성하세요.',
+      isSelfGovernmentSection
+        ? '활동자료의 날짜와 활동명은 한국어 표현 그대로 참고하고 March, New semester 같은 영어 표현으로 바꾸지 마세요.'
+        : '',
       `학생 구분: ${studentContext}`,
       qualityContext.length
         ? `반영할 학생 특성: ${qualityContext.join(' / ')}`
@@ -262,7 +289,7 @@ function SchoolLifeRecordsInput({
         throw new Error(data?.error ?? 'Gemini 응답을 불러오지 못했습니다.')
       }
 
-      updateRecordValue(section.id, data.text ?? '')
+      updateRecordValue(section.id, cleanGeneratedRecordText(data.text))
       onToast?.(`${selectedStudent.name} 학생의 ${section.label} 문장을 생성했습니다.`)
     } catch (error) {
       onToast?.(

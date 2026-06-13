@@ -52,6 +52,14 @@ export async function onRequestPost(context) {
         'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
+        systemInstruction: {
+          parts: [
+            {
+              text:
+                '너는 중학교 교사가 학교생활기록부 문장을 작성하도록 돕는 보조자다. 모든 응답은 한국어로 작성한다. 제목, 설명, 번호, 목록, 불릿, 마크다운, 영어 번역을 쓰지 말고 완성된 생활기록부 문장만 출력한다.',
+            },
+          ],
+        },
         contents: [
           {
             role: 'user',
@@ -59,8 +67,8 @@ export async function onRequestPost(context) {
           },
         ],
         generationConfig: {
-          temperature: 0.45,
-          maxOutputTokens: 320,
+          temperature: 0.35,
+          maxOutputTokens: 700,
         },
       }),
     },
