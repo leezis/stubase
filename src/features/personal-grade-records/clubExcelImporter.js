@@ -12,7 +12,6 @@ function parseClubRows(rows, fileName) {
     const studentNumText = String(row[0] ?? '').trim()
     const studentName = String(row[1] ?? '').trim()
     const clubName = String(row[2] ?? '').trim()
-    const clubClassName = String(row[3] ?? '').trim()
     const teacherName = String(row[4] ?? '').trim()
 
     if (!clubName || /^번\s*호$/.test(studentNumText)) {
@@ -29,7 +28,7 @@ function parseClubRows(rows, fileName) {
         studentName,
         clubActivity: {
           name: clubName,
-          className: clubClassName,
+          className: '',
           teacher: teacherName,
         },
         autonomousClub: {
@@ -42,6 +41,11 @@ function parseClubRows(rows, fileName) {
     }
 
     if (currentRecord) {
+      if (!currentRecord.clubActivity.className) {
+        currentRecord.clubActivity.className = clubName
+        return
+      }
+
       currentRecord.autonomousClub = {
         name: clubName,
         teacher: teacherName,

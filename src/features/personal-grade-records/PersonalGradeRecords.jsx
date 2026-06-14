@@ -496,17 +496,27 @@ function PersonalGradeRecords({
           </div>
         </section>
 
-        <section className="personal-grade-records-card">
+        <section className="personal-grade-records-card personal-grade-records-card--club">
           <div className="personal-grade-records-card__header">
             <span className="personal-grade-records-card__number">3</span>
             <h2>동아리활동</h2>
           </div>
-          <div className="personal-grade-records-mini-grid">
+          <div className="personal-grade-records-mini-grid personal-grade-records-mini-grid--club">
             <label className="personal-grade-records-mini-card">
               <strong>동아리활동</strong>
               <input
                 value={recordData.club.clubActivity.name}
                 onChange={(event) => updateClubField('clubActivity', 'name', event.target.value)}
+                placeholder="부서명"
+              />
+            </label>
+            <label className="personal-grade-records-mini-card">
+              <strong>학교스포츠클럽</strong>
+              <input
+                value={recordData.club.clubActivity.className}
+                onChange={(event) =>
+                  updateClubField('clubActivity', 'className', event.target.value)
+                }
                 placeholder="부서명"
               />
             </label>
@@ -521,12 +531,12 @@ function PersonalGradeRecords({
           </div>
         </section>
 
-        <section className="personal-grade-records-card">
+        <section className="personal-grade-records-card personal-grade-records-card--volunteer">
           <div className="personal-grade-records-card__header">
             <span className="personal-grade-records-card__number">4</span>
             <h2>봉사활동</h2>
           </div>
-          <div className="personal-grade-records-mini-grid">
+          <div className="personal-grade-records-mini-grid personal-grade-records-mini-grid--volunteer">
             <label className="personal-grade-records-mini-card">
               <strong>봉사시간</strong>
               <input

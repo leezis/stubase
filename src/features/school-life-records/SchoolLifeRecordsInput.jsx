@@ -1,28 +1,68 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   fetchClassSchoolLifeRecordRows,
+  fetchClassStudentRows,
+  fetchClubDepartmentOptions,
+  fetchClubDepartmentStudentRows,
   fetchComparableSchoolLifeRecordRows,
   fetchSchoolLifeRecordRows,
+  fetchSchoolLifeRecordComparisonRows,
   getSchoolLifeRecordErrorMessage,
   saveSchoolLifeRecordValue,
 } from './schoolLifeRecordsRepository.js'
 import './SchoolLifeRecordsInput.css'
 
 export const SELF_GOVERNMENT_SECTION_ID = 'self-government'
+const CLUB_SECTION_ID = 'club'
+const SPORTS_CLUB_SECTION_ID = 'sports-club'
 const ACTIVITY_STORAGE_KEY = 'dsy-school-life-self-government-activities-v1'
 const RECORD_STORAGE_KEY = 'dsy-school-life-record-values-v1'
 const DEFAULT_ACTIVITY_YEAR = '2026'
 const SELF_GOVERNMENT_MIN_LENGTH = 350
 const SELF_GOVERNMENT_MAX_LENGTH = 450
+const CLUB_RECORD_MIN_LENGTH = 100
+const CLUB_RECORD_MAX_LENGTH = 200
 const MAX_RECORD_SIMILARITY = 0.5
+const CAUTION_RECORD_SIMILARITY = 0.3
+const SIMILARITY_HIGHLIGHT_MIN_WORDS = 4
+const SIMILARITY_HIGHLIGHT_MAX_WORDS = 8
+const SIMILARITY_HIGHLIGHT_MIN_COMPACT_LENGTH = 12
+const ACTIVITY_PHRASE_COMPARE_WINDOW = 180
+const MIN_REPEATED_ACTIVITY_PHRASE_LENGTH = 30
 const MAX_DIVERSITY_REPAIR_ATTEMPTS = 2
+const SIMILARITY_SCOPE_CLASS = 'class'
+const SIMILARITY_SCOPE_GRADE = 'grade'
+const SIMILARITY_SCOPE_ALL = 'all'
 export const SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL = 'personal'
 export const SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS = 'class'
+export const SCHOOL_LIFE_RECORD_INPUT_MODE_SIMILARITY = 'similarity'
 
 const emptySchoolLifeQualities = {
   competencies: [],
   characters: [],
 }
+
+const similarityScopeOptions = [
+  {
+    id: SIMILARITY_SCOPE_CLASS,
+    label: '우리 반',
+  },
+  {
+    id: SIMILARITY_SCOPE_GRADE,
+    label: '같은 학년',
+  },
+  {
+    id: SIMILARITY_SCOPE_ALL,
+    label: '전체 학년',
+  },
+]
 
 const selfGovernmentRecordSection = {
   id: SELF_GOVERNMENT_SECTION_ID,
@@ -35,13 +75,23 @@ const selfGovernmentRecordSection = {
 }
 
 const clubRecordSection = {
-  id: 'club',
+  id: CLUB_SECTION_ID,
   label: '동아리 활동',
   placeholder: '동아리 활동 내용을 입력하세요.',
   promptGuide:
     '중학교 학교생활기록부의 동아리 활동 내용을 교사가 기록하는 문체로 작성해 주세요.',
   fallbackMemo:
     '동아리 활동에 꾸준히 참여하며 활동 과정에서 맡은 역할을 성실히 수행함.',
+}
+
+const sportsClubRecordSection = {
+  id: SPORTS_CLUB_SECTION_ID,
+  label: '학교스포츠클럽',
+  placeholder: '학교스포츠클럽 활동 내용을 입력하세요.',
+  promptGuide:
+    '중학교 학교생활기록부의 학교스포츠클럽 활동 내용을 교사가 기록하는 문체로 작성해 주세요.',
+  fallbackMemo:
+    '학교스포츠클럽 활동에 성실히 참여하며 규칙을 지키고 친구들과 협력하는 태도를 보임.',
 }
 
 const careerRecordSection = {
@@ -95,6 +145,7 @@ const personalRecordSections = [
 const classRecordSections = [
   selfGovernmentRecordSection,
   clubRecordSection,
+  sportsClubRecordSection,
   careerRecordSection,
   freeSemesterSubjectRecordSection,
   freeSemesterCareerRecordSection,
@@ -103,6 +154,7 @@ const classRecordSections = [
 const allRecordSections = [
   selfGovernmentRecordSection,
   clubRecordSection,
+  sportsClubRecordSection,
   careerRecordSection,
   freeSemesterSubjectRecordSection,
   freeSemesterCareerRecordSection,
@@ -597,8 +649,29 @@ function getStudentSortValue(student) {
   )
 }
 
+function sortClassStudents(students) {
+  return [...(students ?? [])].sort(
+    (left, right) => getStudentSortValue(left) - getStudentSortValue(right),
+  )
+}
+
 function getStudentDisplayLabel(student) {
   return `${student.grade}학년 ${student.class_num}반 ${student.student_num}번 ${student.name}`
+}
+
+function getStudentCodeLabel(student) {
+  return `${student.grade}${student.class_num}${String(student.student_num).padStart(2, '0')}`
+}
+
+function getStudentSimilarityIdentityLabel(student) {
+  return `${getStudentCodeLabel(student)} ${student.name ?? ''}`.trim()
+}
+
+function getSimilarityScopeLabel(scope) {
+  return (
+    similarityScopeOptions.find((option) => option.id === scope)?.label ??
+    similarityScopeOptions[0].label
+  )
 }
 
 function parseActivityRows(text) {
@@ -1026,6 +1099,32 @@ function cleanGeneratedRecordText(text) {
     .trim()
 }
 
+function normalizeGeneratedRecordPunctuation(text) {
+  const terminalEndingPattern =
+    /(했음|하였음|였음|었음|았음|익혔음|이해했음|보였음|나타냈음|참여했음|수행했음|정리했음|확인했음|생각했음|적용했음|발전시켰음|확장했음|기여했음|실천했음|구체화했음|함|됨|임|보임|나타냄|기여함|실천함|확인함|정리함|발전시킴|확장함|참여함|수행함|이해함|탐색함|구체화함|익힘)/
+  let normalizedText = String(text ?? '')
+    .replace(/，/g, ',')
+    .replace(/\s+([,.!?])/g, '$1')
+    .replace(/([.!?])\s*,/g, '$1')
+    .trim()
+
+  normalizedText = normalizedText.replace(
+    new RegExp(`(${terminalEndingPattern.source})\\s*,\\s*(?=[가-힣0-9])`, 'gu'),
+    '$1. ',
+  )
+  normalizedText = normalizedText
+    .replace(/\s+/g, ' ')
+    .replace(/([.!?]){2,}/g, '$1')
+    .replace(/,\s*$/u, '.')
+    .trim()
+
+  if (normalizedText && !/[.!?]$/u.test(normalizedText)) {
+    normalizedText = `${normalizedText}.`
+  }
+
+  return normalizedText
+}
+
 function getRecordTextLength(text) {
   return Array.from(String(text ?? '')).length
 }
@@ -1035,6 +1134,89 @@ function isWithinSelfGovernmentLength(text) {
   return (
     textLength >= SELF_GOVERNMENT_MIN_LENGTH &&
     textLength <= SELF_GOVERNMENT_MAX_LENGTH
+  )
+}
+
+function isWithinClubRecordLength(text) {
+  const textLength = getRecordTextLength(text)
+  return textLength >= CLUB_RECORD_MIN_LENGTH && textLength <= CLUB_RECORD_MAX_LENGTH
+}
+
+function normalizeHangulText(value) {
+  return String(value ?? '').replace(/[^가-힣]/g, '')
+}
+
+function getClubDepartmentTopicKeywords(departmentName) {
+  const compactDepartmentName = normalizeHangulText(departmentName)
+  const knownTopicWords = [
+    '축구',
+    '농구',
+    '배구',
+    '배드민턴',
+    '탁구',
+    '피구',
+    '뉴스포츠',
+    '기타',
+    '밴드',
+    '음악',
+    '미술',
+    '만화',
+    '댄스',
+    '독서',
+    '과학',
+    '탐구',
+    '상담',
+    '요리',
+    '코딩',
+    '영어',
+    '수학',
+    '방송',
+    '합창',
+    '연극',
+    '영화',
+    '공예',
+    '체스',
+  ]
+  const keywords = new Set()
+
+  if (compactDepartmentName.length >= 2) {
+    keywords.add(compactDepartmentName)
+  }
+
+  const trimmedDepartmentName = compactDepartmentName
+    .replace(/^기초탄탄/u, '')
+    .replace(/(스쿨|교실|클럽|동아리|부서|부|반)$/u, '')
+
+  if (trimmedDepartmentName.length >= 2) {
+    keywords.add(trimmedDepartmentName)
+  }
+
+  knownTopicWords.forEach((topicWord) => {
+    if (compactDepartmentName.includes(topicWord)) {
+      keywords.add(topicWord)
+    }
+  })
+
+  return Array.from(keywords)
+}
+
+function isClubGeneratedRecordOnTopic(text, departmentName) {
+  const topicKeywords = getClubDepartmentTopicKeywords(departmentName)
+
+  if (!topicKeywords.length) {
+    return true
+  }
+
+  const compactText = normalizeHangulText(text)
+
+  return topicKeywords.some((keyword) => compactText.includes(keyword))
+}
+
+function isValidClubGeneratedText(text, departmentName = '') {
+  return (
+    isLikelyKoreanRecordText(text, false) &&
+    isWithinClubRecordLength(text) &&
+    isClubGeneratedRecordOnTopic(text, departmentName)
   )
 }
 
@@ -1241,6 +1423,36 @@ function calculateRecordSimilarity(leftText, rightText) {
   return Math.max(threeGramScore * 0.55 + fourGramScore * 0.45)
 }
 
+function formatSimilarityPercent(score) {
+  return `${Math.round(Number(score ?? 0) * 100)}%`
+}
+
+function getSimilarityTone(score) {
+  if (score > MAX_RECORD_SIMILARITY) {
+    return 'high'
+  }
+
+  if (score >= CAUTION_RECORD_SIMILARITY) {
+    return 'caution'
+  }
+
+  return 'safe'
+}
+
+function getSimilarityToneLabel(score) {
+  const tone = getSimilarityTone(score)
+
+  if (tone === 'high') {
+    return '수정 권장'
+  }
+
+  if (tone === 'caution') {
+    return '주의'
+  }
+
+  return '안정'
+}
+
 function getRecordSimilarityResult(text, comparableRows) {
   const comparisons = (comparableRows ?? [])
     .map((row) => ({
@@ -1283,6 +1495,369 @@ function getRepeatedSimilarityPhrases(text, topMatches) {
   return Array.from(phrases)
 }
 
+function normalizeSimilarityHighlightToken(token) {
+  return String(token ?? '')
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}\d]/gu, '')
+    .trim()
+}
+
+function createHighlightTokenMap(text) {
+  const sourceText = String(text ?? '')
+  const tokens = []
+  const tokenMatches = sourceText.matchAll(/\S+/gu)
+
+  for (const match of tokenMatches) {
+    const rawText = match[0]
+    const cleanText = normalizeSimilarityHighlightToken(rawText)
+
+    if (!cleanText) {
+      continue
+    }
+
+    tokens.push({
+      cleanText,
+      end: match.index + rawText.length - 1,
+      start: match.index,
+    })
+  }
+
+  return {
+    sourceText,
+    tokens,
+  }
+}
+
+function getHighlightPhraseKey(tokens) {
+  return tokens.map((token) => token.cleanText).join('\u0001')
+}
+
+function isMeaningfulHighlightPhrase(tokens) {
+  const compactLength = tokens.reduce(
+    (sum, token) => sum + token.cleanText.length,
+    0,
+  )
+  const contentWordCount = tokens.filter((token) => token.cleanText.length >= 2)
+    .length
+
+  return (
+    tokens.length >= SIMILARITY_HIGHLIGHT_MIN_WORDS &&
+    compactLength >= SIMILARITY_HIGHLIGHT_MIN_COMPACT_LENGTH &&
+    contentWordCount >= 3
+  )
+}
+
+function collectHighlightPhraseKeys(textMap) {
+  const phraseKeys = new Set()
+
+  for (
+    let size = SIMILARITY_HIGHLIGHT_MIN_WORDS;
+    size <= SIMILARITY_HIGHLIGHT_MAX_WORDS;
+    size += 1
+  ) {
+    for (let start = 0; start <= textMap.tokens.length - size; start += 1) {
+      const phraseTokens = textMap.tokens.slice(start, start + size)
+
+      if (isMeaningfulHighlightPhrase(phraseTokens)) {
+        phraseKeys.add(getHighlightPhraseKey(phraseTokens))
+      }
+    }
+  }
+
+  return phraseKeys
+}
+
+function getSharedSimilarityHighlightPhrases(leftText, rightText) {
+  const leftMap = createHighlightTokenMap(leftText)
+  const rightPhraseKeys = collectHighlightPhraseKeys(
+    createHighlightTokenMap(rightText),
+  )
+  const selectedPhrases = []
+
+  for (
+    let size = SIMILARITY_HIGHLIGHT_MAX_WORDS;
+    size >= SIMILARITY_HIGHLIGHT_MIN_WORDS && selectedPhrases.length < 10;
+    size -= 1
+  ) {
+    for (
+      let start = 0;
+      start <= leftMap.tokens.length - size && selectedPhrases.length < 10;
+      start += 1
+    ) {
+      const phraseTokens = leftMap.tokens.slice(start, start + size)
+
+      if (!isMeaningfulHighlightPhrase(phraseTokens)) {
+        continue
+      }
+
+      const phraseKey = getHighlightPhraseKey(phraseTokens)
+      const isAlreadyCovered = selectedPhrases.some((phrase) =>
+        phrase.key.includes(phraseKey),
+      )
+
+      if (rightPhraseKeys.has(phraseKey) && !isAlreadyCovered) {
+        selectedPhrases.push({
+          key: phraseKey,
+          tokens: phraseTokens.map((token) => token.cleanText),
+        })
+      }
+    }
+  }
+
+  return selectedPhrases
+}
+
+function addHighlightPhraseRangesToMask(textMap, phrases, highlightMask) {
+  phrases.forEach((phrase) => {
+    const phraseLength = phrase.tokens.length
+
+    for (
+      let start = 0;
+      start <= textMap.tokens.length - phraseLength;
+      start += 1
+    ) {
+      const candidateTokens = textMap.tokens.slice(start, start + phraseLength)
+      const candidateKey = getHighlightPhraseKey(candidateTokens)
+
+      if (candidateKey !== phrase.key) {
+        continue
+      }
+
+      const originalStart = candidateTokens[0].start
+      const originalEnd = candidateTokens[candidateTokens.length - 1].end
+
+      for (let index = originalStart; index <= originalEnd; index += 1) {
+        highlightMask[index] = true
+      }
+    }
+  })
+}
+
+function createSimilarityHighlightSegments(text, phrases) {
+  const textMap = createHighlightTokenMap(text)
+  const highlightMask = Array(textMap.sourceText.length).fill(false)
+
+  addHighlightPhraseRangesToMask(textMap, phrases, highlightMask)
+
+  const segments = []
+  let currentText = ''
+  let currentHighlighted = false
+
+  for (let index = 0; index < textMap.sourceText.length; index += 1) {
+    const char = textMap.sourceText[index]
+    const isHighlighted = highlightMask[index]
+
+    if (currentText && isHighlighted !== currentHighlighted) {
+      segments.push({
+        isHighlighted: currentHighlighted,
+        text: currentText,
+      })
+      currentText = ''
+    }
+
+    currentHighlighted = isHighlighted
+    currentText += char
+  }
+
+  if (currentText) {
+    segments.push({
+      isHighlighted: currentHighlighted,
+      text: currentText,
+    })
+  }
+
+  return segments.length
+    ? segments
+    : [
+        {
+          isHighlighted: false,
+          text,
+        },
+      ]
+}
+
+function createSimilarityHighlightPair(leftText, rightText) {
+  const phrases = getSharedSimilarityHighlightPhrases(leftText, rightText)
+
+  return {
+    leftSegments: createSimilarityHighlightSegments(leftText, phrases),
+    rightSegments: createSimilarityHighlightSegments(rightText, phrases),
+  }
+}
+
+function getActivityReferenceTexts(activity) {
+  return [
+    formatActivityForRecordSentence(activity),
+    activity.content,
+    formatDateForRecord(activity.date)
+      ? `${activity.content}${formatDateForRecord(activity.date)}`
+      : '',
+  ]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+}
+
+function getActivityFollowupSegment(text, activity, activityRows = []) {
+  const sourceText = String(text ?? '')
+  const activityReferences = getActivityReferenceTexts(activity)
+  const matchedReference = activityReferences
+    .map((reference) => ({
+      index: sourceText.indexOf(reference),
+      reference,
+    }))
+    .filter((match) => match.index >= 0)
+    .sort((left, right) => left.index - right.index)[0]
+
+  if (!matchedReference) {
+    return ''
+  }
+
+  const segmentStart = matchedReference.index + matchedReference.reference.length
+  const rawSegment = sourceText.slice(
+    segmentStart,
+    segmentStart + ACTIVITY_PHRASE_COMPARE_WINDOW,
+  )
+  const boundaryIndexes = []
+  const sentenceBoundaryIndex = rawSegment.search(/[.!?]/u)
+
+  if (sentenceBoundaryIndex > 0) {
+    boundaryIndexes.push(sentenceBoundaryIndex)
+  }
+
+  activityRows
+    .filter((candidate) => candidate !== activity)
+    .forEach((candidate) => {
+      getActivityReferenceTexts(candidate).forEach((reference) => {
+        const referenceIndex = rawSegment.indexOf(reference)
+
+        if (referenceIndex > 0) {
+          boundaryIndexes.push(referenceIndex)
+        }
+      })
+    })
+
+  const segmentEnd = boundaryIndexes.length
+    ? Math.min(...boundaryIndexes)
+    : rawSegment.length
+
+  return rawSegment.slice(0, segmentEnd).trim()
+}
+
+function normalizeActivityPhraseForComparison(text) {
+  return normalizeRecordForSimilarity(text)
+}
+
+function getLongestCommonSubstringLength(leftText, rightText) {
+  const leftChars = Array.from(leftText)
+  const rightChars = Array.from(rightText)
+
+  if (!leftChars.length || !rightChars.length) {
+    return 0
+  }
+
+  let previousRow = Array(rightChars.length + 1).fill(0)
+  let currentRow = Array(rightChars.length + 1).fill(0)
+  let longestLength = 0
+
+  for (let leftIndex = 1; leftIndex <= leftChars.length; leftIndex += 1) {
+    currentRow.fill(0)
+
+    for (
+      let rightIndex = 1;
+      rightIndex <= rightChars.length;
+      rightIndex += 1
+    ) {
+      if (leftChars[leftIndex - 1] !== rightChars[rightIndex - 1]) {
+        continue
+      }
+
+      currentRow[rightIndex] = previousRow[rightIndex - 1] + 1
+      longestLength = Math.max(longestLength, currentRow[rightIndex])
+    }
+
+    const nextPreviousRow = previousRow
+    previousRow = currentRow
+    currentRow = nextPreviousRow
+  }
+
+  return longestLength
+}
+
+function getRepeatedActivityPhraseResult(
+  text,
+  selectedActivityRows,
+  comparableRows = [],
+) {
+  let bestMatch = {
+    activityName: '',
+    isRepeated: false,
+    sharedLength: 0,
+    similarityScore: 0,
+    studentId: null,
+  }
+
+  if (!selectedActivityRows.length || !comparableRows.length) {
+    return bestMatch
+  }
+
+  selectedActivityRows.forEach((activity) => {
+    const candidateSegment = normalizeActivityPhraseForComparison(
+      getActivityFollowupSegment(text, activity, selectedActivityRows),
+    )
+
+    if (candidateSegment.length < MIN_REPEATED_ACTIVITY_PHRASE_LENGTH) {
+      return
+    }
+
+    comparableRows.forEach((row) => {
+      const comparisonSegment = normalizeActivityPhraseForComparison(
+        getActivityFollowupSegment(
+          row.content,
+          activity,
+          selectedActivityRows,
+        ),
+      )
+
+      if (comparisonSegment.length < MIN_REPEATED_ACTIVITY_PHRASE_LENGTH) {
+        return
+      }
+
+      const sharedLength = getLongestCommonSubstringLength(
+        candidateSegment,
+        comparisonSegment,
+      )
+      const shortestLength = Math.min(
+        candidateSegment.length,
+        comparisonSegment.length,
+      )
+      const similarityScore = shortestLength
+        ? sharedLength / shortestLength
+        : 0
+
+      if (sharedLength > bestMatch.sharedLength) {
+        bestMatch = {
+          activityName: formatActivityForRecordSentence(activity),
+          isRepeated:
+            sharedLength >= MIN_REPEATED_ACTIVITY_PHRASE_LENGTH,
+          sharedLength,
+          similarityScore,
+          studentId: row.student_id ?? null,
+        }
+      }
+    })
+  })
+
+  return bestMatch
+}
+
+function hasRepeatedActivityPhrase(text, selectedActivityRows, comparableRows) {
+  return getRepeatedActivityPhraseResult(
+    text,
+    selectedActivityRows,
+    comparableRows,
+  ).isRepeated
+}
+
 function createDiversityInstruction(generatedText, similarityResult, attemptNumber) {
   if (!similarityResult?.topMatches?.length) {
     return ''
@@ -1315,6 +1890,19 @@ function createDiversityInstruction(generatedText, similarityResult, attemptNumb
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+function createActivityPhraseDiversityInstruction(activityPhraseResult, attemptNumber) {
+  if (!activityPhraseResult?.isRepeated) {
+    return ''
+  }
+
+  return [
+    `[활동별 중복 문구 수정 지시 ${attemptNumber}]`,
+    `${activityPhraseResult.activityName} 활동 뒤 설명에서 기존 학생 문장과 ${activityPhraseResult.sharedLength}자 이상 연속으로 같은 표현이 반복되었습니다.`,
+    '활동명과 날짜는 유지하되, 그 뒤의 배운 점, 태도, 실천 장면을 다른 어휘와 문장 구조로 다시 쓰세요.',
+    '특히 "응급 상황에서 당황하지 않고 도움을 요청하며 필요한 절차를 따르는"처럼 그대로 반복되는 활동 설명 문구는 쓰지 마세요.',
+  ].join('\n')
 }
 
 function isQualityAllowedForActivity(quality, activityContent) {
@@ -1469,7 +2057,17 @@ function fitSelfGovernmentRecordLength(text, qualityWords = []) {
     }
   }
 
-  return trimSelfGovernmentRecordLength(fittedText)
+  const normalizedText = normalizeGeneratedRecordPunctuation(
+    trimSelfGovernmentRecordLength(fittedText),
+  )
+
+  if (getRecordTextLength(normalizedText) <= SELF_GOVERNMENT_MAX_LENGTH) {
+    return normalizedText
+  }
+
+  return normalizeGeneratedRecordPunctuation(
+    trimSelfGovernmentRecordLength(normalizedText),
+  )
 }
 
 function buildSelfGovernmentFallbackRecord(selectedActivityRows, schoolLifeQualities) {
@@ -1524,6 +2122,7 @@ function buildSelfGovernmentFallbackRecord(selectedActivityRows, schoolLifeQuali
 
 function SchoolLifeRecordsInput({
   inputMode = SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL,
+  onClassStudentListChange,
   onHeaderActionsChange,
   onSchoolLifeQualitySelectionsChange,
   onToast,
@@ -1541,6 +2140,26 @@ function SchoolLifeRecordsInput({
     createInitialActivityTextsByClass,
   )
   const [isActivityEditorOpen, setIsActivityEditorOpen] = useState(false)
+  const [classSimilarityReport, setClassSimilarityReport] = useState(null)
+  const [classStudentRowsState, setClassStudentRowsState] = useState({
+    isLoading: false,
+    rows: [],
+    scopeKey: '',
+  })
+  const [clubDepartmentOptionsState, setClubDepartmentOptionsState] = useState({
+    isLoading: false,
+    options: [],
+  })
+  const [selectedClubDepartment, setSelectedClubDepartment] = useState('')
+  const [clubDepartmentStudentsState, setClubDepartmentStudentsState] =
+    useState({
+      departmentName: '',
+      isLoading: false,
+      rows: [],
+    })
+  const [similarityScope, setSimilarityScope] = useState(
+    SIMILARITY_SCOPE_CLASS,
+  )
   const [classSectionId, setClassSectionId] = useState(
     SELF_GOVERNMENT_SECTION_ID,
   )
@@ -1557,13 +2176,20 @@ function SchoolLifeRecordsInput({
   const recordValuesRef = useRef(recordValues)
   const remoteSaveTimersRef = useRef({})
   const lastRemoteStorageErrorRef = useRef('')
+  const emitClassStudentListChange = useEffectEvent((nextList) => {
+    onClassStudentListChange?.(nextList)
+  })
   const selectedStudentId = selectedStudent?.id ?? null
   const activeClassGrade = selectedGrade || selectedStudent?.grade || ''
   const activeClassNum = selectedClass || selectedStudent?.class_num || ''
-  const selectedClassStudents = useMemo(
+  const isClassWideRecordMode =
+    inputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS ||
+    inputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_SIMILARITY
+  const classSimilarityScopeKey = `${activeClassGrade || ''}-${activeClassNum || ''}`
+  const loadedClassStudents = useMemo(
     () =>
-      students
-        .filter((student) => {
+      sortClassStudents(
+        students.filter((student) => {
           if (!activeClassGrade || !activeClassNum) {
             return false
           }
@@ -1572,25 +2198,70 @@ function SchoolLifeRecordsInput({
             String(student.grade) === String(activeClassGrade) &&
             String(student.class_num) === String(activeClassNum)
           )
-        })
-        .slice()
-        .sort((left, right) => getStudentSortValue(left) - getStudentSortValue(right)),
+        }),
+      ),
     [activeClassGrade, activeClassNum, students],
   )
+  const hasCompleteClassStudentRows =
+    classStudentRowsState.scopeKey === classSimilarityScopeKey &&
+    classStudentRowsState.rows.length > 0
+  const isClassStudentRowsLoading =
+    classStudentRowsState.scopeKey === classSimilarityScopeKey &&
+    classStudentRowsState.isLoading
+  const classSelectedSection =
+    classRecordSections.find((section) => section.id === classSectionId) ??
+    classRecordSections[0]
+  const classScopedStudents = useMemo(
+    () =>
+      hasCompleteClassStudentRows
+        ? classStudentRowsState.rows
+        : loadedClassStudents,
+    [classStudentRowsState.rows, hasCompleteClassStudentRows, loadedClassStudents],
+  )
+  const isClubDepartmentStudentList =
+    classSelectedSection.id === CLUB_SECTION_ID && Boolean(selectedClubDepartment)
+  const selectedClassStudents = useMemo(() => {
+    if (isClubDepartmentStudentList) {
+      return clubDepartmentStudentsState.departmentName === selectedClubDepartment
+        ? clubDepartmentStudentsState.rows
+        : []
+    }
+
+    return classScopedStudents
+  }, [
+    classScopedStudents,
+    clubDepartmentStudentsState.departmentName,
+    clubDepartmentStudentsState.rows,
+    isClubDepartmentStudentList,
+    selectedClubDepartment,
+  ])
+  const isClubDepartmentStudentsLoading =
+    isClubDepartmentStudentList &&
+    clubDepartmentStudentsState.departmentName === selectedClubDepartment &&
+    clubDepartmentStudentsState.isLoading
+  const isClubDepartmentStudentsPending =
+    isClubDepartmentStudentList &&
+    clubDepartmentStudentsState.departmentName !== selectedClubDepartment
+  const isClubDepartmentStudentsBusy =
+    isClubDepartmentStudentsPending ||
+    (isClubDepartmentStudentsLoading && !selectedClassStudents.length)
   const selectedClassStudentIds = useMemo(
     () => selectedClassStudents.map((student) => student.id).filter(Boolean),
     [selectedClassStudents],
   )
   const selectedClassStudentIdKey = selectedClassStudentIds.join(',')
-  const classSelectedSection =
-    classRecordSections.find((section) => section.id === classSectionId) ??
-    classRecordSections[0]
   const classGenerationStateKey = getClassGenerationStateKey(
     classSelectedSection.id,
   )
   const isGeneratingClassSection = Boolean(
     generatingSectionIds[classGenerationStateKey],
   )
+  const activeClassSimilarityReport =
+    classSimilarityReport?.sectionId === classSelectedSection.id &&
+    classSimilarityReport?.scopeKey === classSimilarityScopeKey &&
+    classSimilarityReport?.similarityScope === similarityScope
+      ? classSimilarityReport
+      : null
   const personalSelectedSection =
     personalRecordSections.find((section) => section.id === personalSectionId) ??
     personalRecordSections[0]
@@ -1600,6 +2271,15 @@ function SchoolLifeRecordsInput({
     activeClassGrade || activeClassNum
       ? `${activeClassGrade || ''}학년 ${activeClassNum || ''}반`
       : '현재 학급'
+  const classListLabel = isClubDepartmentStudentList
+    ? `${selectedClubDepartment} 동아리`
+    : classLabel
+  const classStudentCountLabel = isClubDepartmentStudentsBusy
+    ? '불러오는 중...'
+    : `${selectedClassStudents.length}명`
+  const classStudentEmptyMessage = isClubDepartmentStudentList
+    ? '선택한 동아리 부서의 학생이 없습니다.'
+    : '선택한 학급의 학생이 없습니다.'
 
   const showRemoteStorageError = useCallback(
     (error) => {
@@ -1630,6 +2310,195 @@ function SchoolLifeRecordsInput({
     },
     [showRemoteStorageError],
   )
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadCompleteClassStudents() {
+      if (
+        !isClassWideRecordMode ||
+        !activeClassGrade ||
+        !activeClassNum
+      ) {
+        setClassStudentRowsState({
+          isLoading: false,
+          rows: [],
+          scopeKey: '',
+        })
+        return
+      }
+
+      setClassStudentRowsState((previous) => ({
+        isLoading: true,
+        rows:
+          previous.scopeKey === classSimilarityScopeKey ? previous.rows : [],
+        scopeKey: classSimilarityScopeKey,
+      }))
+
+      const { data, error } = await fetchClassStudentRows({
+        classNum: activeClassNum,
+        grade: activeClassGrade,
+      })
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        showRemoteStorageError(error)
+        setClassStudentRowsState((previous) => ({
+          ...previous,
+          isLoading: false,
+        }))
+        return
+      }
+
+      setClassStudentRowsState({
+        isLoading: false,
+        rows: sortClassStudents(data ?? []),
+        scopeKey: classSimilarityScopeKey,
+      })
+    }
+
+    void loadCompleteClassStudents()
+
+    return () => {
+      isMounted = false
+    }
+  }, [
+    activeClassGrade,
+    activeClassNum,
+    classSimilarityScopeKey,
+    isClassWideRecordMode,
+    showRemoteStorageError,
+  ])
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadClubDepartmentOptions() {
+      if (
+        inputMode !== SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS ||
+        classSelectedSection.id !== CLUB_SECTION_ID
+      ) {
+        return
+      }
+
+      setClubDepartmentOptionsState((previous) => ({
+        ...previous,
+        isLoading: true,
+      }))
+
+      const { data, error } = await fetchClubDepartmentOptions({
+        schoolYear: DEFAULT_ACTIVITY_YEAR,
+      })
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        showRemoteStorageError(error)
+        setClubDepartmentOptionsState((previous) => ({
+          ...previous,
+          isLoading: false,
+        }))
+        return
+      }
+
+      setClubDepartmentOptionsState({
+        isLoading: false,
+        options: data ?? [],
+      })
+    }
+
+    void loadClubDepartmentOptions()
+
+    return () => {
+      isMounted = false
+    }
+  }, [classSelectedSection.id, inputMode, showRemoteStorageError])
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadClubDepartmentStudents() {
+      if (
+        inputMode !== SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS ||
+        classSelectedSection.id !== CLUB_SECTION_ID ||
+        !selectedClubDepartment
+      ) {
+        return
+      }
+
+      setClubDepartmentStudentsState((previous) => ({
+        departmentName: selectedClubDepartment,
+        isLoading: true,
+        rows:
+          previous.departmentName === selectedClubDepartment
+            ? previous.rows
+            : [],
+      }))
+
+      const { data, error } = await fetchClubDepartmentStudentRows({
+        departmentName: selectedClubDepartment,
+        schoolYear: DEFAULT_ACTIVITY_YEAR,
+      })
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        showRemoteStorageError(error)
+        setClubDepartmentStudentsState((previous) => ({
+          ...previous,
+          isLoading: false,
+        }))
+        return
+      }
+
+      setClubDepartmentStudentsState({
+        departmentName: selectedClubDepartment,
+        isLoading: false,
+        rows: sortClassStudents(data ?? []),
+      })
+    }
+
+    void loadClubDepartmentStudents()
+
+    return () => {
+      isMounted = false
+    }
+  }, [
+    classSelectedSection.id,
+    inputMode,
+    selectedClubDepartment,
+    showRemoteStorageError,
+  ])
+
+  useEffect(() => {
+    if (
+      inputMode !== SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS ||
+      !isClubDepartmentStudentList
+    ) {
+      emitClassStudentListChange(null)
+      return
+    }
+
+    emitClassStudentListChange({
+      isActive: true,
+      isLoading: isClubDepartmentStudentsBusy,
+      label: selectedClubDepartment,
+      students: selectedClassStudents,
+    })
+  }, [
+    inputMode,
+    isClubDepartmentStudentList,
+    isClubDepartmentStudentsBusy,
+    selectedClassStudents,
+    selectedClubDepartment,
+  ])
 
   useEffect(() => {
     recordValuesRef.current = recordValues
@@ -1747,9 +2616,9 @@ function SchoolLifeRecordsInput({
 
     async function loadClassRecordValues() {
       if (
-        inputMode !== SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS ||
-        !activeClassGrade ||
-        !activeClassNum ||
+        !isClassWideRecordMode ||
+        (!isClubDepartmentStudentList &&
+          (!activeClassGrade || !activeClassNum)) ||
         !selectedClassStudentIds.length
       ) {
         return
@@ -1802,7 +2671,8 @@ function SchoolLifeRecordsInput({
   }, [
     activeClassGrade,
     activeClassNum,
-    inputMode,
+    isClassWideRecordMode,
+    isClubDepartmentStudentList,
     selectedClassStudentIdKey,
     selectedClassStudentIds,
     showRemoteStorageError,
@@ -1832,6 +2702,10 @@ function SchoolLifeRecordsInput({
 
   function updateRecordValueForStudent(studentId, sectionId, value) {
     const recordKey = getStudentRecordKey(sectionId, studentId)
+
+    if (sectionId === SELF_GOVERNMENT_SECTION_ID) {
+      setClassSimilarityReport(null)
+    }
 
     setRecordValues((previous) => {
       const nextRecordValues = { ...previous }
@@ -1866,6 +2740,44 @@ function SchoolLifeRecordsInput({
     }))
   }
 
+  function getClubCharacterQualitySelection() {
+    const characterOptions =
+      (schoolLifeQualityOptions.characters ?? []).length > 0
+        ? schoolLifeQualityOptions.characters
+        : schoolLifeQualities.characters ?? []
+
+    return getRandomSchoolLifeQualitySelection(
+      {
+        competencies: [],
+        characters: characterOptions,
+      },
+      7,
+      12,
+    )
+  }
+
+  function createClubDepartmentPromptInstruction(
+    departmentName,
+    characterWords = [],
+  ) {
+    const topicKeywords = getClubDepartmentTopicKeywords(departmentName)
+
+    return [
+      `동아리 부서명: ${departmentName}`,
+      `반드시 ${departmentName} 활동 자체와 관련된 내용으로 작성하세요.`,
+      characterWords.length
+        ? `반영할 학생품성 7~12개: ${characterWords.join(', ')}. 이 품성 단어를 그대로 나열하지 말고 동아리 활동 중 보이는 태도와 행동으로 자연스럽게 녹여 쓰세요.`
+        : '',
+      topicKeywords.length
+        ? `문장 안에 다음 핵심 주제 중 하나 이상이 자연스럽게 드러나야 합니다: ${topicKeywords.join(', ')}.`
+        : '',
+      `글자 수는 공백 포함 ${CLUB_RECORD_MIN_LENGTH}자 이상 ${CLUB_RECORD_MAX_LENGTH}자 이하로 작성하세요.`,
+      '봉사, 나눔, 배려 같은 일반적 표현만으로 채우지 말고 해당 동아리에서 실제로 할 법한 연습, 탐구, 협력, 발표, 경기, 제작, 감상, 역할 수행 내용을 넣으세요.',
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
+
   function createRecordPrompt(
     section,
     currentText,
@@ -1877,6 +2789,7 @@ function SchoolLifeRecordsInput({
     const memo = currentText.trim()
     const studentContext = `${targetStudent.grade}학년 ${targetStudent.class_num}반 ${targetStudent.student_num}번`
     const isSelfGovernmentSection = section.id === SELF_GOVERNMENT_SECTION_ID
+    const isClubSection = section.id === CLUB_SECTION_ID
     const originalSelectedQualities = [
       ...(targetSchoolLifeQualities.competencies ?? []),
       ...(targetSchoolLifeQualities.characters ?? []),
@@ -1911,12 +2824,18 @@ function SchoolLifeRecordsInput({
 
     return [
       section.promptGuide,
+      '종결 어미 뒤에는 쉼표를 쓰지 말고 반드시 마침표를 쓰세요. 예: 익혔음, → 익혔음. / 기여함, → 기여함.',
       '아래 조건을 반드시 지켜서 완성된 한국어 생활기록부 문장만 출력하세요.',
       '영어 번역, 제목, 설명, 번호, 목록, 불릿, 마크다운 기호(*, **, #, -), 따옴표를 절대 쓰지 마세요.',
       '학생 이름은 넣지 말고, 과장된 표현은 피해 주세요.',
       isSelfGovernmentSection
         ? '한 문단으로 작성하고 최종 출력은 공백 포함 반드시 350자 이상 450자 이하로 맞추세요. 349자 이하는 실패이고 451자 이상도 실패입니다.'
-        : '관찰 가능한 행동 중심으로 자연스럽게 2문장, 180자 이내로 작성하세요.',
+        : isClubSection
+          ? `관찰 가능한 행동 중심으로 자연스럽게 2문장, 공백 포함 ${CLUB_RECORD_MIN_LENGTH}자 이상 ${CLUB_RECORD_MAX_LENGTH}자 이하로 작성하세요.`
+          : '관찰 가능한 행동 중심으로 자연스럽게 2문장, 180자 이내로 작성하세요.',
+      isClubSection
+        ? '동아리 활동명이나 부서명이 주어지면 그 제목에 걸맞은 구체적인 활동 내용, 역할 수행, 협력 태도, 연습이나 탐구 과정을 중심으로 작성하세요.'
+        : '',
       isSelfGovernmentSection
         ? '아래에서 랜덤 선택된 자율자치 활동 3~4개만 활용하고, 출력은 반드시 활동내용(실시일) 형식을 문장 안에 넣어 이어 쓰세요. 예: 학교폭력 예방교육(2026.03.11.)을 통해 타인의 입장을 이해하고 갈등을 평화롭게 해결하는 방법을 배움.'
         : '관찰 가능한 행동과 태도 중심으로 작성하세요.',
@@ -1991,13 +2910,14 @@ function SchoolLifeRecordsInput({
       throw new Error(data?.error ?? 'Gemini 응답을 불러오지 못했습니다.')
     }
 
-    return cleanGeneratedRecordText(data.text)
+    return normalizeGeneratedRecordPunctuation(cleanGeneratedRecordText(data.text))
   }
 
   function isValidSelfGovernmentGeneratedText(
     text,
     selectedActivityRows,
     selectedQualityWords,
+    comparableRows = [],
   ) {
     return (
       isLikelyKoreanRecordText(text, true) &&
@@ -2005,6 +2925,7 @@ function SchoolLifeRecordsInput({
       isGeneratedRecordStructuredByActivityPairs(text, selectedActivityRows) &&
       !hasMechanicalQualityLabeling(text, selectedQualityWords) &&
       !hasRepeatedGenericClosing(text) &&
+      !hasRepeatedActivityPhrase(text, selectedActivityRows, comparableRows) &&
       !hasBrokenRecordEnding(text)
     )
   }
@@ -2017,6 +2938,10 @@ function SchoolLifeRecordsInput({
     const recordKey = getRecordKey(section.id)
     const currentText = recordValues[recordKey] ?? ''
     const isSelfGovernmentSection = section.id === SELF_GOVERNMENT_SECTION_ID
+    const isClubSection = section.id === CLUB_SECTION_ID
+    const clubQualitySelection = isClubSection
+      ? getClubCharacterQualitySelection()
+      : emptySchoolLifeQualities
     const selectedActivityRows = isSelfGovernmentSection
       ? getRandomActivityRows(activityRows)
       : []
@@ -2025,7 +2950,7 @@ function SchoolLifeRecordsInput({
           schoolLifeQualities,
           selectedActivityRows,
         )
-      : emptySchoolLifeQualities
+      : clubQualitySelection
     const selectedQualityWords = isSelfGovernmentSection
       ? [
           ...allowedSchoolLifeQualities.competencies,
@@ -2061,7 +2986,9 @@ function SchoolLifeRecordsInput({
             text,
             selectedActivityRows,
             selectedQualityWords,
-          ))
+            comparableRows,
+          )) &&
+        (!isClubSection || isValidClubGeneratedText(text))
 
       let bestCandidate = null
       let bestSimilarityResult = {
@@ -2082,8 +3009,25 @@ function SchoolLifeRecordsInput({
             currentText,
             selectedActivityRows,
             diversityInstruction,
+            selectedStudent,
+            isClubSection ? clubQualitySelection : schoolLifeQualities,
           ),
         )
+        const activityPhraseResult = isSelfGovernmentSection
+          ? getRepeatedActivityPhraseResult(
+              generatedText,
+              selectedActivityRows,
+              comparableRows,
+            )
+          : { isRepeated: false }
+
+        if (activityPhraseResult.isRepeated) {
+          diversityInstruction = createActivityPhraseDiversityInstruction(
+            activityPhraseResult,
+            attempt + 1,
+          )
+          continue
+        }
 
         if (!isValidGeneratedText(generatedText)) {
           continue
@@ -2228,8 +3172,128 @@ function SchoolLifeRecordsInput({
     ]
   }
 
-  function getCurrentClassComparableRows(sectionId) {
-    return selectedClassStudents
+  async function handleGenerateClubDepartmentRecords() {
+    if (
+      classSelectedSection.id !== CLUB_SECTION_ID ||
+      !selectedClubDepartment ||
+      isClubDepartmentStudentsBusy ||
+      !selectedClassStudents.length
+    ) {
+      return
+    }
+
+    setSectionGenerationState(classGenerationStateKey, true)
+
+    let completedCount = 0
+    let skippedCount = 0
+
+    try {
+      for (const student of selectedClassStudents) {
+        const recordKey = getStudentRecordKey(classSelectedSection.id, student.id)
+        const currentText = recordValuesRef.current[recordKey] ?? ''
+        const clubQualitySelection = getClubCharacterQualitySelection()
+        let generatedText = ''
+
+        try {
+          for (
+            let attempt = 0;
+            attempt <= MAX_DIVERSITY_REPAIR_ATTEMPTS;
+            attempt += 1
+          ) {
+            const nextGeneratedText = await requestGeneratedRecordText(
+              createRecordPrompt(
+                classSelectedSection,
+                currentText,
+                [],
+                createClubDepartmentPromptInstruction(
+                  selectedClubDepartment,
+                  clubQualitySelection.characters,
+                ),
+                student,
+                clubQualitySelection,
+              ),
+            )
+
+            if (
+              isValidClubGeneratedText(
+                nextGeneratedText,
+                selectedClubDepartment,
+              )
+            ) {
+              generatedText = nextGeneratedText
+              break
+            }
+          }
+
+          if (!generatedText) {
+            skippedCount += 1
+            continue
+          }
+
+          updateRecordValueForStudent(
+            student.id,
+            classSelectedSection.id,
+            generatedText,
+          )
+          completedCount += 1
+        } catch {
+          skippedCount += 1
+        }
+      }
+
+      if (!completedCount) {
+        onToast?.(
+          '동아리 활동 문장을 생성하지 못했습니다. Gemini 연결 상태를 확인해 주세요.',
+          'error',
+        )
+        return
+      }
+
+      onToast?.(
+        `${selectedClubDepartment} ${completedCount}명 동아리 활동 문장을 생성했습니다.${
+          skippedCount ? ` ${skippedCount}명은 생성하지 못했습니다.` : ''
+        }`,
+      )
+    } finally {
+      setSectionGenerationState(classGenerationStateKey, false)
+    }
+  }
+
+  async function resolveSelectedClassStudents() {
+    if (!activeClassGrade || !activeClassNum) {
+      return selectedClassStudents
+    }
+
+    if (hasCompleteClassStudentRows) {
+      return classStudentRowsState.rows
+    }
+
+    const { data, error } = await fetchClassStudentRows({
+      classNum: activeClassNum,
+      grade: activeClassGrade,
+    })
+
+    if (error) {
+      showRemoteStorageError(error)
+      return selectedClassStudents
+    }
+
+    const nextRows = sortClassStudents(data ?? [])
+
+    setClassStudentRowsState({
+      isLoading: false,
+      rows: nextRows,
+      scopeKey: classSimilarityScopeKey,
+    })
+
+    return nextRows.length ? nextRows : selectedClassStudents
+  }
+
+  function getCurrentClassComparableRows(
+    sectionId,
+    targetStudents = selectedClassStudents,
+  ) {
+    return targetStudents
       .map((student) => ({
         content:
           recordValuesRef.current[getStudentRecordKey(sectionId, student.id)] ??
@@ -2237,6 +3301,166 @@ function SchoolLifeRecordsInput({
         student_id: student.id,
       }))
       .filter((row) => row.content.trim())
+  }
+
+  function createSimilarityReportPair(leftRow, rightRow) {
+    const score = calculateRecordSimilarity(leftRow.content, rightRow.content)
+
+    return {
+      leftContent: leftRow.content,
+      leftIdentityLabel: getStudentSimilarityIdentityLabel(leftRow.student),
+      leftLabel: getStudentCodeLabel(leftRow.student),
+      leftStudentId: leftRow.student.id,
+      rightContent: rightRow.content,
+      rightIdentityLabel: getStudentSimilarityIdentityLabel(rightRow.student),
+      rightLabel: getStudentCodeLabel(rightRow.student),
+      rightStudentId: rightRow.student.id,
+      score,
+      tone: getSimilarityTone(score),
+    }
+  }
+
+  function addSimilarityHighlightPair(pair) {
+    const highlightPair = createSimilarityHighlightPair(
+      pair.leftContent,
+      pair.rightContent,
+    )
+
+    return {
+      ...pair,
+      leftSegments: highlightPair.leftSegments,
+      rightSegments: highlightPair.rightSegments,
+    }
+  }
+
+  function createCurrentClassRecordRows(
+    sectionId,
+    targetStudents = selectedClassStudents,
+  ) {
+    return targetStudents
+      .map((student) => {
+        const recordKey = getStudentRecordKey(sectionId, student.id)
+        const content = String(recordValuesRef.current[recordKey] ?? '').trim()
+
+        return {
+          content,
+          student,
+        }
+      })
+      .filter((row) => row.content)
+  }
+
+  function createClassSimilarityReport(
+    sectionId,
+    targetStudents = selectedClassStudents,
+    comparisonRows = [],
+    scope = SIMILARITY_SCOPE_CLASS,
+  ) {
+    const rows = createCurrentClassRecordRows(sectionId, targetStudents)
+    const missingCount = targetStudents.length - rows.length
+    const pairs = []
+
+    if (scope === SIMILARITY_SCOPE_CLASS) {
+      for (let leftIndex = 0; leftIndex < rows.length; leftIndex += 1) {
+        for (
+          let rightIndex = leftIndex + 1;
+          rightIndex < rows.length;
+          rightIndex += 1
+        ) {
+          pairs.push(createSimilarityReportPair(rows[leftIndex], rows[rightIndex]))
+        }
+      }
+    } else {
+      rows.forEach((leftRow) => {
+        comparisonRows.forEach((rightRow) => {
+          if (
+            !rightRow.student ||
+            !rightRow.content?.trim() ||
+            rightRow.student_id === leftRow.student.id
+          ) {
+            return
+          }
+
+          pairs.push(createSimilarityReportPair(leftRow, rightRow))
+        })
+      })
+    }
+
+    pairs.sort((left, right) => right.score - left.score)
+
+    return {
+      checkedCount: rows.length,
+      cautionCount: pairs.filter(
+        (pair) =>
+          pair.score >= CAUTION_RECORD_SIMILARITY &&
+          pair.score <= MAX_RECORD_SIMILARITY,
+      ).length,
+      highCount: pairs.filter((pair) => pair.score > MAX_RECORD_SIMILARITY)
+        .length,
+      maxScore: pairs[0]?.score ?? 0,
+      missingCount,
+      pairCount: pairs.length,
+      comparisonCount:
+        scope === SIMILARITY_SCOPE_CLASS ? rows.length : comparisonRows.length,
+      comparisonScopeLabel: getSimilarityScopeLabel(scope),
+      pairs: pairs.slice(0, 20).map(addSimilarityHighlightPair),
+      scopeKey: classSimilarityScopeKey,
+      similarityScope: scope,
+      sectionId,
+    }
+  }
+
+  async function handleCheckClassSelfGovernmentSimilarity() {
+    if (classSelectedSection.id !== SELF_GOVERNMENT_SECTION_ID) {
+      return
+    }
+
+    const classStudentsForReport = await resolveSelectedClassStudents()
+    let comparisonRows = []
+
+    if (similarityScope !== SIMILARITY_SCOPE_CLASS) {
+      const { data, error } = await fetchSchoolLifeRecordComparisonRows({
+        classNum: activeClassNum,
+        excludeStudentIds: classStudentsForReport
+          .map((student) => student.id)
+          .filter(Boolean),
+        grade: activeClassGrade,
+        schoolYear: DEFAULT_ACTIVITY_YEAR,
+        scope: similarityScope,
+        sectionId: SELF_GOVERNMENT_SECTION_ID,
+      })
+
+      if (error) {
+        showRemoteStorageError(error)
+        return
+      }
+
+      comparisonRows = data ?? []
+    }
+
+    const report = createClassSimilarityReport(
+      SELF_GOVERNMENT_SECTION_ID,
+      classStudentsForReport,
+      comparisonRows,
+      similarityScope,
+    )
+
+    setClassSimilarityReport(report)
+
+    if (report.pairCount < 1) {
+      onToast?.(
+        report.similarityScope === SIMILARITY_SCOPE_CLASS
+          ? '유사도 검사를 하려면 입력된 학생 문장이 2명 이상 필요합니다.'
+          : '선택한 범위에 비교할 저장 문장이 아직 없습니다.',
+      )
+      return
+    }
+
+    const resultMessage = report.highCount
+      ? `${report.highCount}쌍이 50%를 초과했습니다.`
+      : `최고 유사도 ${formatSimilarityPercent(report.maxScore)}로 확인했습니다.`
+
+    onToast?.(`${classLabel} ${report.comparisonScopeLabel} 유사도 검사를 완료했습니다. ${resultMessage}`)
   }
 
   function createFallbackClassSelfGovernmentCandidate(
@@ -2276,6 +3500,7 @@ function SchoolLifeRecordsInput({
           candidateText,
           candidateActivityRows,
           selectedQualityWords,
+          comparableRows,
         )
       ) {
         continue
@@ -2309,22 +3534,31 @@ function SchoolLifeRecordsInput({
   async function handleGenerateClassSelfGovernmentRecords() {
     if (
       classSelectedSection.id !== SELF_GOVERNMENT_SECTION_ID ||
-      !selectedClassStudents.length
+      (!selectedClassStudents.length && (!activeClassGrade || !activeClassNum))
     ) {
       return
     }
 
     setSectionGenerationState(classGenerationStateKey, true)
 
-    const existingComparableRows = getCurrentClassComparableRows(
-      SELF_GOVERNMENT_SECTION_ID,
-    )
     const generatedRows = []
     const nextQualitySelectionsByStudentId = {}
     let tooSimilarCount = 0
 
     try {
-      for (const student of selectedClassStudents) {
+      const classStudentsForGeneration = await resolveSelectedClassStudents()
+
+      if (!classStudentsForGeneration.length) {
+        onToast?.(`${classLabel} 학생 목록을 불러오지 못했습니다. 학생 목록을 확인해 주세요.`, 'error')
+        return
+      }
+
+      const existingComparableRows = getCurrentClassComparableRows(
+        SELF_GOVERNMENT_SECTION_ID,
+        classStudentsForGeneration,
+      )
+
+      for (const student of classStudentsForGeneration) {
         const generatedStudentIds = new Set(
           generatedRows.map((row) => row.student_id),
         )
@@ -2385,11 +3619,26 @@ function SchoolLifeRecordsInput({
             break
           }
 
+          const activityPhraseResult = getRepeatedActivityPhraseResult(
+            generatedText,
+            selectedActivityRows,
+            comparableRows,
+          )
+
+          if (activityPhraseResult.isRepeated) {
+            diversityInstruction = createActivityPhraseDiversityInstruction(
+              activityPhraseResult,
+              attempt + 1,
+            )
+            continue
+          }
+
           if (
             !isValidSelfGovernmentGeneratedText(
               generatedText,
               selectedActivityRows,
               selectedQualityWords,
+              comparableRows,
             )
           ) {
             continue
@@ -2623,27 +3872,34 @@ function SchoolLifeRecordsInput({
             </div>
 
             {classSelectedSection.id === SELF_GOVERNMENT_SECTION_ID ? (
-              <button
-                className="school-life-records-ai-button school-life-records-ai-button--class"
-                type="button"
-                onClick={handleGenerateClassSelfGovernmentRecords}
-                disabled={
-                  isGeneratingClassSection || !selectedClassStudents.length
-                }
-              >
-                {isGeneratingClassSection
-                  ? '전체학생 생성 중...'
-                  : '전체학생 Gemini 생성'}
-              </button>
+              <div className="school-life-records-class-card__actions">
+                <button
+                  className="school-life-records-ai-button school-life-records-ai-button--class"
+                  type="button"
+                  onClick={handleGenerateClassSelfGovernmentRecords}
+                  disabled={
+                    isGeneratingClassSection ||
+                    isClassStudentRowsLoading ||
+                    (!selectedClassStudents.length &&
+                      (!activeClassGrade || !activeClassNum))
+                  }
+                >
+                  {isGeneratingClassSection
+                    ? '전체학생 생성 중...'
+                    : isClassStudentRowsLoading
+                      ? '학생목록 확인 중...'
+                    : '전체학생 Gemini 생성'}
+                </button>
+              </div>
             ) : (
               <span className="school-life-records-activity-count">
-                {selectedClassStudents.length}명
+                {classStudentCountLabel}
               </span>
             )}
           </div>
 
           <div
-            className="school-life-records-section-tabs"
+            className="school-life-records-section-tabs school-life-records-section-tabs--class"
             aria-label="전체 입력 항목 선택"
             role="tablist"
           >
@@ -2656,17 +3912,61 @@ function SchoolLifeRecordsInput({
                 key={section.id}
                 role="tab"
                 type="button"
-                onClick={() => setClassSectionId(section.id)}
+                onClick={() => {
+                  setClassSectionId(section.id)
+                  if (section.id !== CLUB_SECTION_ID) {
+                    setSelectedClubDepartment('')
+                  }
+                }}
               >
                 {section.label}
               </button>
             ))}
           </div>
 
+          {classSelectedSection.id === CLUB_SECTION_ID ? (
+            <div className="school-life-records-club-filter">
+              <label className="school-life-records-club-filter__field">
+                <span>동아리 부서</span>
+                <select
+                  value={selectedClubDepartment}
+                  onChange={(event) =>
+                    setSelectedClubDepartment(event.target.value)
+                  }
+                  disabled={clubDepartmentOptionsState.isLoading}
+                >
+                  <option value="">선택 학급 전체</option>
+                  {clubDepartmentOptionsState.options.map((departmentName) => (
+                    <option key={departmentName} value={departmentName}>
+                      {departmentName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="school-life-records-club-filter__actions">
+                <button
+                  className="school-life-records-ai-button school-life-records-ai-button--club"
+                  type="button"
+                  onClick={handleGenerateClubDepartmentRecords}
+                  disabled={
+                    isGeneratingClassSection ||
+                    !selectedClubDepartment ||
+                    isClubDepartmentStudentsBusy ||
+                    !selectedClassStudents.length
+                  }
+                >
+                  {isGeneratingClassSection
+                    ? '동아리 학생 생성 중...'
+                    : '동아리 학생 Gemini 생성'}
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {selectedClassStudents.length ? (
             <div
               className="school-life-records-class-list"
-              aria-label={`${classLabel} 학생별 ${classSelectedSection.label} 입력`}
+              aria-label={`${classListLabel} 학생별 ${classSelectedSection.label} 입력`}
             >
               {selectedClassStudents.map((student) => {
                 const recordKey = getStudentRecordKey(
@@ -2711,9 +4011,184 @@ function SchoolLifeRecordsInput({
             </div>
           ) : (
             <p className="school-life-records-class-empty">
-              선택한 학급의 학생이 없습니다.
+              {classStudentEmptyMessage}
             </p>
           )}
+        </section>
+      ) : null}
+
+      {inputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_SIMILARITY ? (
+        <section className="school-life-records-class-card">
+          <div className="school-life-records-class-card__header">
+            <div>
+              <p className="section-label">유사도 검사</p>
+              <h2>{classLabel}</h2>
+            </div>
+
+            <div className="school-life-records-class-card__actions">
+              <div
+                className="school-life-records-similarity-scope"
+                aria-label="유사도 비교 범위"
+                role="group"
+              >
+                {similarityScopeOptions.map((option) => (
+                  <button
+                    className={`school-life-records-similarity-scope__button ${
+                      similarityScope === option.id ? 'is-active' : ''
+                    }`}
+                    key={option.id}
+                    type="button"
+                    onClick={() => {
+                      setSimilarityScope(option.id)
+                      setClassSimilarityReport(null)
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="school-life-records-check-button"
+                type="button"
+                onClick={handleCheckClassSelfGovernmentSimilarity}
+                disabled={
+                  isGeneratingClassSection ||
+                  isClassStudentRowsLoading ||
+                  (!selectedClassStudents.length &&
+                    (!activeClassGrade || !activeClassNum))
+                }
+              >
+                유사도 검사
+              </button>
+            </div>
+          </div>
+
+          {activeClassSimilarityReport ? (
+            <section
+              className={`school-life-records-similarity-panel ${
+                activeClassSimilarityReport.highCount ? 'has-high' : ''
+              }`}
+              aria-label="자율자치 활동 유사도 검사 결과"
+            >
+              <div className="school-life-records-similarity-panel__header">
+                <div>
+                  <p className="section-label">유사도 검사 결과</p>
+                  <h3>
+                    최고 유사도{' '}
+                    {formatSimilarityPercent(activeClassSimilarityReport.maxScore)}
+                  </h3>
+                  <p className="school-life-records-similarity-panel__scope">
+                    {activeClassSimilarityReport.similarityScope ===
+                    SIMILARITY_SCOPE_CLASS
+                      ? '우리 반 학생끼리 비교'
+                      : `${classLabel} ↔ ${activeClassSimilarityReport.comparisonScopeLabel} 저장 문장 비교`}
+                  </p>
+                </div>
+                <span
+                  className={`school-life-records-similarity-badge school-life-records-similarity-badge--${getSimilarityTone(
+                    activeClassSimilarityReport.maxScore,
+                  )}`}
+                >
+                  {getSimilarityToneLabel(activeClassSimilarityReport.maxScore)}
+                </span>
+              </div>
+
+              <div className="school-life-records-similarity-summary">
+                <span>
+                  입력 학생
+                  <strong>{activeClassSimilarityReport.checkedCount}명</strong>
+                </span>
+                <span>
+                  비교 대상
+                  <strong>{activeClassSimilarityReport.comparisonCount}명</strong>
+                </span>
+                <span>
+                  비교 쌍
+                  <strong>{activeClassSimilarityReport.pairCount}쌍</strong>
+                </span>
+                <span>
+                  50% 초과
+                  <strong>{activeClassSimilarityReport.highCount}쌍</strong>
+                </span>
+                <span>
+                  30~50%
+                  <strong>{activeClassSimilarityReport.cautionCount}쌍</strong>
+                </span>
+              </div>
+
+              {activeClassSimilarityReport.missingCount ? (
+                <p className="school-life-records-similarity-note">
+                  입력 내용이 없는 학생 {activeClassSimilarityReport.missingCount}명은
+                  비교에서 제외했습니다.
+                </p>
+              ) : null}
+
+              {activeClassSimilarityReport.pairCount < 1 ? (
+                <p className="school-life-records-similarity-empty">
+                  {activeClassSimilarityReport.similarityScope ===
+                  SIMILARITY_SCOPE_CLASS
+                    ? '입력된 자율자치 활동 문장이 2명 이상일 때 유사도를 비교할 수 있습니다.'
+                    : '선택한 범위에 비교할 저장 문장이 아직 없습니다.'}
+                </p>
+              ) : (
+                <div className="school-life-records-similarity-list">
+                  {activeClassSimilarityReport.pairs.map((pair, index) => (
+                    <details
+                      className={`school-life-records-similarity-row school-life-records-similarity-row--${pair.tone}`}
+                      key={`${pair.leftStudentId}-${pair.rightStudentId}`}
+                      open={index < 3 && pair.score > MAX_RECORD_SIMILARITY}
+                    >
+                      <summary>
+                        <span className="school-life-records-similarity-card">
+                          <strong>
+                            {pair.leftLabel} <b aria-hidden="true">↔</b>{' '}
+                            {pair.rightLabel}
+                          </strong>
+                          <em>{formatSimilarityPercent(pair.score)}</em>
+                        </span>
+                      </summary>
+                      <div className="school-life-records-similarity-row__texts">
+                        <article>
+                          <h4>{pair.leftIdentityLabel}</h4>
+                          <p>
+                            {pair.leftSegments.map((segment, segmentIndex) => (
+                              <span
+                                className={
+                                  segment.isHighlighted
+                                    ? 'school-life-records-similarity-highlight'
+                                    : undefined
+                                }
+                                key={`${pair.leftStudentId}-left-${segmentIndex}`}
+                              >
+                                {segment.text}
+                              </span>
+                            ))}
+                          </p>
+                        </article>
+                        <article>
+                          <h4>{pair.rightIdentityLabel}</h4>
+                          <p>
+                            {pair.rightSegments.map((segment, segmentIndex) => (
+                              <span
+                                className={
+                                  segment.isHighlighted
+                                    ? 'school-life-records-similarity-highlight'
+                                    : undefined
+                                }
+                                key={`${pair.rightStudentId}-right-${segmentIndex}`}
+                              >
+                                {segment.text}
+                              </span>
+                            ))}
+                          </p>
+                        </article>
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : null}
         </section>
       ) : null}
     </section>

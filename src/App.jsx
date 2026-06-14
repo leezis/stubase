@@ -14,6 +14,7 @@ import SchoolLifeRecordsInput, {
   SELF_GOVERNMENT_SECTION_ID,
   SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS,
   SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL,
+  SCHOOL_LIFE_RECORD_INPUT_MODE_SIMILARITY,
 } from './features/school-life-records/SchoolLifeRecordsInput.jsx'
 import Login from './features/auth/Login.jsx'
 import './App.css'
@@ -233,6 +234,12 @@ const SCHOOL_WORK_MODULES = [
 const emptyStudentWorkspaceFilters = {
   selectedGrade: '',
   selectedClass: '',
+}
+
+const emptySchoolLifeRecordStudentListOverride = {
+  isActive: false,
+  label: '',
+  students: [],
 }
 
 const CLASS_FILTER_OPTIONS = Array.from({ length: 3 }, (_, gradeIndex) =>
@@ -522,6 +529,10 @@ function App() {
   )
   const [schoolLifeRecordPersonalSectionId, setSchoolLifeRecordPersonalSectionId] =
     useState(SELF_GOVERNMENT_SECTION_ID)
+  const [
+    schoolLifeRecordStudentListOverride,
+    setSchoolLifeRecordStudentListOverride,
+  ] = useState(emptySchoolLifeRecordStudentListOverride)
   const [toastMessage, setToastMessage] = useState('')
   const [toastTone, setToastTone] = useState('info')
 
@@ -622,6 +633,58 @@ function App() {
     useState(false)
   const [isManagementMenuOpen, setIsManagementMenuOpen] = useState(false)
   const [isSchoolWorkMenuOpen, setIsSchoolWorkMenuOpen] = useState(false)
+
+  function handleSchoolLifeRecordStudentListChange(nextList) {
+    if (!nextList?.isActive) {
+      setSchoolLifeRecordStudentListOverride((previous) =>
+        previous.isActive ? emptySchoolLifeRecordStudentListOverride : previous,
+      )
+
+      if (
+        activeSchoolWorkSelectedStudentId &&
+        !students.some(
+          (student) => student.id === activeSchoolWorkSelectedStudentId,
+        ) &&
+        students[0]
+      ) {
+        setSchoolWorkSelectedStudentIds((previous) => ({
+          ...previous,
+          [SCHOOL_LIFE_RECORDS_MODULE_ID]: students[0].id,
+        }))
+      }
+
+      return
+    }
+
+    const nextStudents = nextList.students ?? []
+    const nextKey = `${nextList.label ?? ''}:${nextStudents
+      .map((student) => student.id)
+      .join(',')}:${nextList.isLoading ? 'loading' : 'ready'}`
+
+    setSchoolLifeRecordStudentListOverride((previous) =>
+      previous.key === nextKey
+        ? previous
+        : {
+            isActive: true,
+            isLoading: Boolean(nextList.isLoading),
+            key: nextKey,
+            label: nextList.label ?? '',
+            students: nextStudents,
+          },
+    )
+
+    if (
+      nextStudents.length &&
+      !nextStudents.some(
+        (student) => student.id === activeSchoolWorkSelectedStudentId,
+      )
+    ) {
+      setSchoolWorkSelectedStudentIds((previous) => ({
+        ...previous,
+        [SCHOOL_LIFE_RECORDS_MODULE_ID]: nextStudents[0].id,
+      }))
+    }
+  }
 
   function resetStudentForm() {
     setFormValues(initialStudentFormValues)
@@ -2005,7 +2068,22 @@ function App() {
     }
   }, [authUserId, isCounselingDataWorkspaceView, students])
 
-  const hasVisibleStudents = students.length > 0
+  const isSchoolLifeRecordStudentListOverridden =
+    isSchoolLifeRecordsInputView &&
+    schoolLifeRecordInputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS &&
+    schoolLifeRecordStudentListOverride.isActive
+  const visibleStudentList = isSchoolLifeRecordStudentListOverridden
+    ? schoolLifeRecordStudentListOverride.students
+    : students
+  const visibleStudentTotalCount = isSchoolLifeRecordStudentListOverridden
+    ? visibleStudentList.length
+    : totalStudentCount
+  const studentLookupList =
+    isSchoolLifeRecordStudentListOverridden && visibleStudentList.length
+    ? visibleStudentList
+    : students
+  const hasVisibleStudents =
+    visibleStudentList.length > 0 || isSchoolLifeRecordStudentListOverridden
   const isEditing = editingStudentId !== null
   const isBusy =
     isLoading ||
@@ -2017,7 +2095,9 @@ function App() {
     deletingStudentId !== null
   const hasActiveFilters = Boolean(activeSelectedGrade || activeSelectedClass)
   const activeSchoolWorkSelectedStudent = activeSchoolWorkSelectedStudentId
-    ? students.find((student) => student.id === activeSchoolWorkSelectedStudentId) ?? null
+    ? studentLookupList.find(
+        (student) => student.id === activeSchoolWorkSelectedStudentId,
+      ) ?? null
     : null
   const activeWorkspaceSelectedStudent = isSchoolWorkStudentWorkspaceView
     ? activeSchoolWorkSelectedStudent
@@ -2025,7 +2105,7 @@ function App() {
   const previewStudentCounselingCount = previewStudent
     ? counselingCountMap[previewStudent.id] ?? 0
     : 0
-  const groupedStudents = groupStudentsBySchoolPrefix(students)
+  const groupedStudents = groupStudentsBySchoolPrefix(visibleStudentList)
   const defaultStudentWorkspaceHero = {
     badge: 'Student Dashboard',
     title: '학생 목록과 상담 기록을 한 번에 관리해요',
@@ -2053,7 +2133,7 @@ function App() {
           <h2>학생 목록</h2>
         </div>
         <span className="card-count">
-          {students.length}/{totalStudentCount}명
+          {visibleStudentList.length}/{visibleStudentTotalCount}명
         </span>
       </div>
 
@@ -2147,17 +2227,19 @@ function App() {
               ))}
             </ul>
           ))}
-          {isLoadingMoreStudents ? (
+          {!isSchoolLifeRecordStudentListOverridden && isLoadingMoreStudents ? (
             <div className="infinite-status">다음 20명의 학생을 불러오는 중입니다.</div>
           ) : null}
 
-          {hasMoreStudents ? (
+          {!isSchoolLifeRecordStudentListOverridden && hasMoreStudents ? (
             <div className="infinite-sentinel" ref={loadMoreSentinelRef}>
               <span>스크롤을 아래로 내리면 다음 학생을 자동으로 불러옵니다.</span>
             </div>
           ) : null}
 
-          {!hasMoreStudents && totalStudentCount > PAGE_SIZE ? (
+          {!isSchoolLifeRecordStudentListOverridden &&
+          !hasMoreStudents &&
+          totalStudentCount > PAGE_SIZE ? (
             <div className="infinite-status is-complete">
               현재 조건의 학생을 모두 불러왔습니다.
             </div>
@@ -2640,6 +2722,27 @@ function App() {
                       >
                         전체 입력
                       </button>
+                      <button
+                        aria-selected={
+                          schoolLifeRecordInputMode ===
+                          SCHOOL_LIFE_RECORD_INPUT_MODE_SIMILARITY
+                        }
+                        className={`school-life-records-mode-tab ${
+                          schoolLifeRecordInputMode ===
+                          SCHOOL_LIFE_RECORD_INPUT_MODE_SIMILARITY
+                            ? 'is-active'
+                            : ''
+                        }`}
+                        role="tab"
+                        type="button"
+                        onClick={() =>
+                          setSchoolLifeRecordInputMode(
+                            SCHOOL_LIFE_RECORD_INPUT_MODE_SIMILARITY,
+                          )
+                        }
+                      >
+                        유사도 검사
+                      </button>
                     </div>
                   ) : null}
 
@@ -2952,6 +3055,9 @@ function App() {
                     <ActiveSchoolWorkModule
                       dataRefreshKey={activeSchoolWorkDataRefreshKey}
                       inputMode={schoolLifeRecordInputMode}
+                      onClassStudentListChange={
+                        handleSchoolLifeRecordStudentListChange
+                      }
                       onHeaderActionsChange={setSchoolWorkHeaderActions}
                       onSchoolLifeQualitySelectionsChange={
                         applySchoolLifeQualitySelectionsByStudent

@@ -23,6 +23,16 @@ function getStudentKey(student) {
   return `${student.grade}-${student.class_num}-${student.student_num}`
 }
 
+function getUniqueMatchedImports(matchedImports) {
+  const importsByStudentId = new Map()
+
+  matchedImports.forEach((matchedImport) => {
+    importsByStudentId.set(matchedImport.student.id, matchedImport)
+  })
+
+  return Array.from(importsByStudentId.values())
+}
+
 function applyAttendanceImportToRecord(recordData, importedRecord) {
   const nextData = mergePersonalGradeRecordData(recordData)
 
@@ -177,11 +187,13 @@ export async function importPersonalGradeRecordExcel({ files, kind }) {
     })
   })
 
+  const uniqueMatchedImports = getUniqueMatchedImports(matchedImports)
+  const duplicateMatchedCount = matchedImports.length - uniqueMatchedImports.length
   const existingRecordMap = await fetchExistingPersonalGradeRecordMap(
-    matchedImports.map(({ student }) => student.id),
+    uniqueMatchedImports.map(({ student }) => student.id),
   )
 
-  const payload = matchedImports.map(({ importedRecord, student }) => ({
+  const payload = uniqueMatchedImports.map(({ importedRecord, student }) => ({
     student_id: student.id,
     school_year: PERSONAL_GRADE_RECORD_SCHOOL_YEAR,
     data: importConfig.applyImportedRecord(
@@ -201,8 +213,9 @@ export async function importPersonalGradeRecordExcel({ files, kind }) {
   }
 
   return {
+    duplicateMatchedCount,
     kind,
-    matchedCount: matchedImports.length,
+    matchedCount: uniqueMatchedImports.length,
     unmatchedCount: unmatchedImports.length,
     unmatchedPreview: unmatchedImports
       .slice(0, 3)

@@ -385,10 +385,16 @@
   box-shadow: 0 16px 32px rgba(15, 23, 42, 0.06);
 }
 
+.personal-grade-records-card--club,
+.personal-grade-records-card--volunteer {
+  grid-template-rows: auto 1fr;
+}
+
 .personal-grade-records-card__header {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 30px;
   min-width: 0;
 }
 
@@ -424,6 +430,15 @@
 .personal-grade-records-mini-grid--attendance {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.personal-grade-records-mini-grid--club {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.personal-grade-records-mini-grid--volunteer {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
 }
 
 .personal-grade-records-mini-grid--attendance .personal-grade-records-mini-card {

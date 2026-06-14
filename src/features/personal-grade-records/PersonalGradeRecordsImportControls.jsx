@@ -63,6 +63,10 @@ function PersonalGradeRecordsImportControls({ onImportComplete }) {
           result.unmatchedPreview.length
             ? ` (${result.unmatchedPreview.join(', ')})`
             : ''
+        }${
+          result.duplicateMatchedCount
+            ? `, 중복 ${result.duplicateMatchedCount}건 정리`
+            : ''
         }`,
       )
       onImportComplete?.(result)
