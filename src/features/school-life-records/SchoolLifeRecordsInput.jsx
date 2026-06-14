@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  fetchClassSchoolLifeRecordRows,
   fetchComparableSchoolLifeRecordRows,
   fetchSchoolLifeRecordRows,
   getSchoolLifeRecordErrorMessage,
@@ -7,7 +8,7 @@ import {
 } from './schoolLifeRecordsRepository.js'
 import './SchoolLifeRecordsInput.css'
 
-const SELF_GOVERNMENT_SECTION_ID = 'self-government'
+export const SELF_GOVERNMENT_SECTION_ID = 'self-government'
 const ACTIVITY_STORAGE_KEY = 'dsy-school-life-self-government-activities-v1'
 const RECORD_STORAGE_KEY = 'dsy-school-life-record-values-v1'
 const DEFAULT_ACTIVITY_YEAR = '2026'
@@ -15,40 +16,97 @@ const SELF_GOVERNMENT_MIN_LENGTH = 350
 const SELF_GOVERNMENT_MAX_LENGTH = 450
 const MAX_RECORD_SIMILARITY = 0.5
 const MAX_DIVERSITY_REPAIR_ATTEMPTS = 2
+export const SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL = 'personal'
+export const SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS = 'class'
 
 const emptySchoolLifeQualities = {
   competencies: [],
   characters: [],
 }
 
-const recordSections = [
-  {
-    id: SELF_GOVERNMENT_SECTION_ID,
-    label: '자율자치 활동',
-    placeholder: '자율자치 활동 내용을 입력하세요.',
-    promptGuide:
-      '중학교 학교생활기록부의 자율자치 활동 내용을 교사가 기록하는 문체로 작성해 주세요.',
-    fallbackMemo:
-      '학급 자치 활동에 성실히 참여하고 맡은 역할을 책임감 있게 수행함.',
-  },
-  {
-    id: 'club',
-    label: '동아리 활동',
-    placeholder: '동아리 활동 내용을 입력하세요.',
-    promptGuide:
-      '중학교 학교생활기록부의 동아리 활동 내용을 교사가 기록하는 문체로 작성해 주세요.',
-    fallbackMemo:
-      '동아리 활동에 꾸준히 참여하며 활동 과정에서 맡은 역할을 성실히 수행함.',
-  },
-  {
-    id: 'behavior',
-    label: '행동특성 및 종합의견',
-    placeholder: '행동특성 및 종합의견을 입력하세요.',
-    promptGuide:
-      '중학교 학교생활기록부의 행동특성 및 종합의견을 교사가 기록하는 문체로 작성해 주세요.',
-    fallbackMemo:
-      '학교생활에 성실히 참여하고 친구들과 원만하게 지내며 맡은 일을 책임감 있게 수행함.',
-  },
+const selfGovernmentRecordSection = {
+  id: SELF_GOVERNMENT_SECTION_ID,
+  label: '자율자치 활동',
+  placeholder: '자율자치 활동 내용을 입력하세요.',
+  promptGuide:
+    '중학교 학교생활기록부의 자율자치 활동 내용을 교사가 기록하는 문체로 작성해 주세요.',
+  fallbackMemo:
+    '학급 자치 활동에 성실히 참여하고 맡은 역할을 책임감 있게 수행함.',
+}
+
+const clubRecordSection = {
+  id: 'club',
+  label: '동아리 활동',
+  placeholder: '동아리 활동 내용을 입력하세요.',
+  promptGuide:
+    '중학교 학교생활기록부의 동아리 활동 내용을 교사가 기록하는 문체로 작성해 주세요.',
+  fallbackMemo:
+    '동아리 활동에 꾸준히 참여하며 활동 과정에서 맡은 역할을 성실히 수행함.',
+}
+
+const careerRecordSection = {
+  id: 'career',
+  label: '진로 활동',
+  placeholder: '진로 활동 내용을 입력하세요.',
+  promptGuide:
+    '중학교 학교생활기록부의 진로 활동 내용을 교사가 기록하는 문체로 작성해 주세요.',
+  fallbackMemo:
+    '진로 활동에 성실히 참여하며 자신의 흥미와 강점을 살피고 진로 목표를 구체화함.',
+}
+
+const freeSemesterSubjectRecordSection = {
+  id: 'free-semester-subject',
+  label: '자유학기(주제선택)',
+  placeholder: '자유학기 주제선택 활동 내용을 입력하세요.',
+  promptGuide:
+    '중학교 학교생활기록부의 자유학기 주제선택 활동 내용을 교사가 기록하는 문체로 작성해 주세요.',
+  fallbackMemo:
+    '자유학기 주제선택 활동에 성실히 참여하며 주제에 대한 흥미와 이해를 넓힘.',
+}
+
+const freeSemesterCareerRecordSection = {
+  id: 'free-semester-career',
+  label: '자유학기(진로선택)',
+  placeholder: '자유학기 진로선택 활동 내용을 입력하세요.',
+  promptGuide:
+    '중학교 학교생활기록부의 자유학기 진로선택 활동 내용을 교사가 기록하는 문체로 작성해 주세요.',
+  fallbackMemo:
+    '자유학기 진로선택 활동에 성실히 참여하며 자신의 흥미와 진로 방향을 탐색함.',
+}
+
+const behaviorRecordSection = {
+  id: 'behavior',
+  label: '행동특성 및 종합의견',
+  placeholder: '행동특성 및 종합의견 내용을 입력하세요.',
+  promptGuide:
+    '중학교 학교생활기록부의 행동특성 및 종합의견 내용을 교사가 기록하는 문체로 작성해 주세요.',
+  fallbackMemo:
+    '학교생활에 성실히 참여하며 자신의 강점을 바탕으로 공동체 안에서 긍정적인 태도를 보임.',
+}
+
+const personalRecordSections = [
+  selfGovernmentRecordSection,
+  clubRecordSection,
+  careerRecordSection,
+  freeSemesterSubjectRecordSection,
+  freeSemesterCareerRecordSection,
+]
+
+const classRecordSections = [
+  selfGovernmentRecordSection,
+  clubRecordSection,
+  careerRecordSection,
+  freeSemesterSubjectRecordSection,
+  freeSemesterCareerRecordSection,
+]
+
+const allRecordSections = [
+  selfGovernmentRecordSection,
+  clubRecordSection,
+  careerRecordSection,
+  freeSemesterSubjectRecordSection,
+  freeSemesterCareerRecordSection,
+  behaviorRecordSection,
 ]
 
 const SERVICE_ACTIVITY_KEYWORDS = [
@@ -459,10 +517,32 @@ const QUALITY_EXPRESSION_GUIDES = {
 }
 
 const DEFAULT_QUALITY_EXPRESSION_GUIDE = {
-  activity: '활동 내용을 자신의 생활과 연결하며',
-  growth: '배운 내용을 생활 속 태도로 이어 가는',
+  activity: '활동에서 확인한 내용을 구체적인 상황과 견주어 보며',
+  growth: '확인한 내용을 실제 선택으로 옮기는',
   prompt: '활동에서 배운 내용을 구체적인 행동으로 옮기는 모습',
 }
+
+const DEFAULT_QUALITY_ACTIVITY_PHRASES = [
+  '활동에서 확인한 내용을 구체적인 상황과 견주어 보며',
+  '교육 내용을 자신에게 일어날 수 있는 장면으로 바꾸어 생각하며',
+  '배운 절차를 실제 학급 상황에 적용할 방법을 떠올리며',
+  '활동의 핵심 내용을 자신의 말로 정리하며',
+  '필요한 행동을 스스로 점검하고 다음 상황을 예상하며',
+  '주변에서 비슷한 상황이 생겼을 때의 대처를 생각하며',
+  '활동 중 알게 된 기준을 자신의 행동과 비교하며',
+  '친구들과 나눌 수 있는 실천 방법을 떠올리며',
+]
+
+const DEFAULT_GROWTH_PHRASES = [
+  '확인한 내용을 실제 선택으로 옮기는',
+  '상황에 맞게 판단하고 실천하는',
+  '배운 절차를 차분히 떠올리는',
+  '자신의 역할을 구체적으로 점검하는',
+  '필요한 행동을 먼저 생각하는',
+  '학급 상황을 살피며 참여하는',
+  '활동의 의미를 다음 경험과 연결하는',
+  '친구들과 약속을 확인하는',
+]
 
 function createInitialActivityTextsByClass() {
   if (typeof window === 'undefined') {
@@ -503,6 +583,22 @@ function getClassActivityKey(selectedGrade, selectedClass, selectedStudent) {
 
 function getStudentRecordKey(sectionId, studentId) {
   return `${sectionId}:${studentId ?? 'empty'}`
+}
+
+function getClassGenerationStateKey(sectionId) {
+  return `class:${sectionId}`
+}
+
+function getStudentSortValue(student) {
+  return (
+    Number(student?.grade ?? 0) * 1000000 +
+    Number(student?.class_num ?? 0) * 10000 +
+    Number(student?.student_num ?? 0)
+  )
+}
+
+function getStudentDisplayLabel(student) {
+  return `${student.grade}학년 ${student.class_num}반 ${student.student_num}번 ${student.name}`
 }
 
 function parseActivityRows(text) {
@@ -655,6 +751,35 @@ function getQualityExpressionGuide(quality) {
   return QUALITY_EXPRESSION_GUIDES[quality] ?? DEFAULT_QUALITY_EXPRESSION_GUIDE
 }
 
+function getQualityActivityPhrase(quality, usedActivityPhrases = new Set()) {
+  if (quality && QUALITY_EXPRESSION_GUIDES[quality]) {
+    return QUALITY_EXPRESSION_GUIDES[quality].activity
+  }
+
+  const availablePhrases = DEFAULT_QUALITY_ACTIVITY_PHRASES.filter(
+    (phrase) => !usedActivityPhrases.has(phrase),
+  )
+  const selectedPhrase = getRandomItem(
+    availablePhrases.length ? availablePhrases : DEFAULT_QUALITY_ACTIVITY_PHRASES,
+  )
+
+  if (selectedPhrase) {
+    usedActivityPhrases.add(selectedPhrase)
+  }
+
+  return selectedPhrase ?? DEFAULT_QUALITY_EXPRESSION_GUIDE.activity
+}
+
+function getGrowthPhrase(qualityWords = []) {
+  const selectedQuality = getRandomItem(qualityWords)
+
+  if (selectedQuality && QUALITY_EXPRESSION_GUIDES[selectedQuality]) {
+    return QUALITY_EXPRESSION_GUIDES[selectedQuality].growth
+  }
+
+  return getRandomItem(DEFAULT_GROWTH_PHRASES) ?? DEFAULT_QUALITY_EXPRESSION_GUIDE.growth
+}
+
 function getRandomItem(items) {
   if (!items.length) {
     return undefined
@@ -802,6 +927,81 @@ function getRandomQualityWords(schoolLifeQualities, targetCount = 4) {
   }
 
   return shuffledWords.slice(0, targetCount)
+}
+
+function getRandomSchoolLifeQualitySelection(
+  schoolLifeQualityOptions,
+  minCount = 7,
+  maxCount = 12,
+) {
+  const groupedOptions = [
+    ...(schoolLifeQualityOptions.competencies ?? []).map((value) => ({
+      group: 'competencies',
+      value,
+    })),
+    ...(schoolLifeQualityOptions.characters ?? []).map((value) => ({
+      group: 'characters',
+      value,
+    })),
+  ].filter((option) => option.value)
+  const uniqueOptions = []
+  const usedValues = new Set()
+
+  groupedOptions.forEach((option) => {
+    if (usedValues.has(option.value)) {
+      return
+    }
+
+    usedValues.add(option.value)
+    uniqueOptions.push(option)
+  })
+
+  for (let index = uniqueOptions.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1))
+    ;[uniqueOptions[index], uniqueOptions[randomIndex]] = [
+      uniqueOptions[randomIndex],
+      uniqueOptions[index],
+    ]
+  }
+
+  const targetCount =
+    Math.floor(Math.random() * (maxCount - minCount + 1)) + minCount
+  const selectedOptions = uniqueOptions.slice(
+    0,
+    Math.min(targetCount, uniqueOptions.length),
+  )
+  const selectedGroups = new Set(selectedOptions.map((option) => option.group))
+
+  ;['competencies', 'characters'].forEach((group) => {
+    if (selectedGroups.has(group) || !selectedOptions.length) {
+      return
+    }
+
+    const replacementOption = uniqueOptions.find(
+      (option) => option.group === group,
+    )
+
+    if (!replacementOption) {
+      return
+    }
+
+    const replaceIndex = selectedOptions.findIndex(
+      (option) => option.group !== group,
+    )
+
+    if (replaceIndex >= 0) {
+      selectedOptions[replaceIndex] = replacementOption
+    }
+  })
+
+  return {
+    competencies: selectedOptions
+      .filter((option) => option.group === 'competencies')
+      .map((option) => option.value),
+    characters: selectedOptions
+      .filter((option) => option.group === 'characters')
+      .map((option) => option.value),
+  }
 }
 
 function cleanGeneratedRecordText(text) {
@@ -969,7 +1169,10 @@ function hasRepeatedGenericClosing(text) {
 
   return (
     compactText.includes('긍정적인학급분위기형성에기여함') ||
-    compactText.includes('활동과정에서친구의의견을경청하고필요한도움을주며')
+    compactText.includes('활동과정에서친구의의견을경청하고필요한도움을주며') ||
+    compactText.includes('활동내용을자신의생활과연결하며') ||
+    compactText.includes('배운내용을생활속태도로이어가는') ||
+    compactText.includes('이후활동내용을다시확인하며')
   )
 }
 
@@ -1106,6 +1309,7 @@ function createDiversityInstruction(generatedText, similarityResult, attemptNumb
     )}% 유사했습니다. 최종 문장은 기존 문장과 체감 유사도 50% 이하가 되도록 다시 작성하세요.`,
     '활동 순서와 2문장 구조는 유지하되, 첫 문장의 연결 방식, 두 번째 문장의 시작, 마무리 관점, 역량/품성 표현을 모두 바꾸세요.',
     '아래 기존 문장과 같은 구절, 같은 마무리, 같은 "생활 속/학교생활 속/이어 가려 함" 전개를 반복하지 마세요.',
+    '"활동 내용을 자신의 생활과 연결하며" 같은 공통 시작 표현과 "이후 활동 내용을 다시 확인하며" 같은 공통 마무리는 금지입니다.',
     matchedExamples,
     repeatedPhraseText,
   ]
@@ -1140,13 +1344,14 @@ function createActivityFallbackClause(
   qualityWords,
   usedQualities,
   usedFocuses,
+  usedActivityPhrases,
 ) {
   const quality = getQualityForActivity(
     qualityWords,
     activity.content,
     usedQualities,
   )
-  const qualityPhrase = getQualityExpressionGuide(quality).activity
+  const qualityPhrase = getQualityActivityPhrase(quality, usedActivityPhrases)
   const focusPhrase = getActivityFallbackFocus(activity.content, usedFocuses)
 
   return `${formatActivityForRecordSentence(activity)}에서 ${qualityPhrase} ${focusPhrase}`
@@ -1161,15 +1366,15 @@ function closeFallbackClauseAsSentence(clause) {
 }
 
 function getLengthAdditions(qualityWords = []) {
-  const growthPhrase =
-    getQualityExpressionGuide(getRandomItem(qualityWords)).growth ??
-    DEFAULT_QUALITY_EXPRESSION_GUIDE.growth
+  const growthPhrase = getGrowthPhrase(qualityWords)
 
   return [
-    `이후 활동 내용을 다시 확인하며 ${growthPhrase} 태도를 차분히 다져 감`,
+    `남은 과정에서도 ${growthPhrase} 태도를 차분히 다져 감`,
     '상황에 맞는 실천 방법을 스스로 점검하고 실제 장면에서 필요한 행동을 떠올림',
     '친구들과 필요한 약속을 확인하며 활동에서 배운 절차를 구체적인 선택으로 연결함',
     '자신의 행동을 돌아보고 활동별 핵심 내용을 다음 참여 과정에 활용하려 노력함',
+    '활동 후 달라진 생각을 정리하며 다음 참여 장면에서 실천할 방법을 구체화함',
+    '학급 안에서 마주칠 수 있는 비슷한 상황을 떠올리고 필요한 말과 행동을 정리함',
   ]
 }
 
@@ -1182,9 +1387,7 @@ function getShortLengthAdditions() {
 }
 
 function createClosingSentence(remainingClauses, qualityWords) {
-  const growthPhrase =
-    getQualityExpressionGuide(getRandomItem(qualityWords)).growth ??
-    DEFAULT_QUALITY_EXPRESSION_GUIDE.growth
+  const growthPhrase = getGrowthPhrase(qualityWords)
   const secondSentenceStart = remainingClauses.length
     ? `${remainingClauses.join(', ')},`
     : '앞선 활동을 되짚으며'
@@ -1194,6 +1397,9 @@ function createClosingSentence(remainingClauses, qualityWords) {
     `${secondSentenceStart} 상황별 대처 방법을 친구들과 확인하면서 ${growthPhrase} 자세를 실제 학급 장면에 적용함.`,
     `${secondSentenceStart} 알게 된 내용을 단순히 기억하는 데 그치지 않고 다음 활동에서 실천할 기준으로 삼음.`,
     `${secondSentenceStart} 각 활동에서 확인한 약속과 절차를 바탕으로 자신이 할 수 있는 역할을 다시 정리함.`,
+    `${secondSentenceStart} 활동 후 달라진 생각을 정리하고 비슷한 상황에서 먼저 살펴야 할 점을 분명히 함.`,
+    `${secondSentenceStart} 친구들과 함께 지켜야 할 약속을 다시 확인하며 다음 참여 장면에서 필요한 행동을 구체화함.`,
+    `${secondSentenceStart} 배운 내용을 한 가지 태도로 묶기보다 상황별로 다르게 적용할 방법을 생각함.`,
   ]
 
   return getRandomItem(closingTemplates)
@@ -1283,6 +1489,7 @@ function buildSelfGovernmentFallbackRecord(selectedActivityRows, schoolLifeQuali
   const qualityWords = getRandomQualityWords(allowedSchoolLifeQualities)
   const usedQualities = new Set()
   const usedFocuses = new Set()
+  const usedActivityPhrases = new Set()
   const clauses = activities
     .slice(0, 4)
     .map((activity) =>
@@ -1291,6 +1498,7 @@ function buildSelfGovernmentFallbackRecord(selectedActivityRows, schoolLifeQuali
         qualityWords,
         usedQualities,
         usedFocuses,
+        usedActivityPhrases,
       ),
     )
   const firstSentenceClauses = clauses.slice(0, Math.min(2, clauses.length))
@@ -1315,19 +1523,27 @@ function buildSelfGovernmentFallbackRecord(selectedActivityRows, schoolLifeQuali
 }
 
 function SchoolLifeRecordsInput({
+  inputMode = SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL,
   onHeaderActionsChange,
+  onSchoolLifeQualitySelectionsChange,
   onToast,
+  personalSectionId = SELF_GOVERNMENT_SECTION_ID,
   schoolLifeQualities = emptySchoolLifeQualities,
+  schoolLifeQualityOptions = emptySchoolLifeQualities,
   selectedClass = '',
   selectedGrade = '',
   selectedStudent,
+  students = [],
 }) {
   const [recordValues, setRecordValues] = useState(createInitialRecordValues)
   const [generatingSectionIds, setGeneratingSectionIds] = useState({})
   const [activityTextsByClass, setActivityTextsByClass] = useState(
     createInitialActivityTextsByClass,
   )
-  const [isActivityEditorOpen, setIsActivityEditorOpen] = useState(true)
+  const [isActivityEditorOpen, setIsActivityEditorOpen] = useState(false)
+  const [classSectionId, setClassSectionId] = useState(
+    SELF_GOVERNMENT_SECTION_ID,
+  )
   const classActivityKey = getClassActivityKey(
     selectedGrade,
     selectedClass,
@@ -1342,11 +1558,47 @@ function SchoolLifeRecordsInput({
   const remoteSaveTimersRef = useRef({})
   const lastRemoteStorageErrorRef = useRef('')
   const selectedStudentId = selectedStudent?.id ?? null
+  const activeClassGrade = selectedGrade || selectedStudent?.grade || ''
+  const activeClassNum = selectedClass || selectedStudent?.class_num || ''
+  const selectedClassStudents = useMemo(
+    () =>
+      students
+        .filter((student) => {
+          if (!activeClassGrade || !activeClassNum) {
+            return false
+          }
+
+          return (
+            String(student.grade) === String(activeClassGrade) &&
+            String(student.class_num) === String(activeClassNum)
+          )
+        })
+        .slice()
+        .sort((left, right) => getStudentSortValue(left) - getStudentSortValue(right)),
+    [activeClassGrade, activeClassNum, students],
+  )
+  const selectedClassStudentIds = useMemo(
+    () => selectedClassStudents.map((student) => student.id).filter(Boolean),
+    [selectedClassStudents],
+  )
+  const selectedClassStudentIdKey = selectedClassStudentIds.join(',')
+  const classSelectedSection =
+    classRecordSections.find((section) => section.id === classSectionId) ??
+    classRecordSections[0]
+  const classGenerationStateKey = getClassGenerationStateKey(
+    classSelectedSection.id,
+  )
+  const isGeneratingClassSection = Boolean(
+    generatingSectionIds[classGenerationStateKey],
+  )
+  const personalSelectedSection =
+    personalRecordSections.find((section) => section.id === personalSectionId) ??
+    personalRecordSections[0]
+  const isPersonalSelfGovernmentSection =
+    personalSelectedSection.id === SELF_GOVERNMENT_SECTION_ID
   const classLabel =
-    selectedGrade || selectedClass
-      ? `${selectedGrade || selectedStudent?.grade || ''}학년 ${
-          selectedClass || selectedStudent?.class_num || ''
-        }반`
+    activeClassGrade || activeClassNum
+      ? `${activeClassGrade || ''}학년 ${activeClassNum || ''}반`
       : '현재 학급'
 
   const showRemoteStorageError = useCallback(
@@ -1451,7 +1703,7 @@ function SchoolLifeRecordsInput({
         setRecordValues((previous) => {
           const nextRecordValues = { ...previous }
 
-          recordSections.forEach((section) => {
+          allRecordSections.forEach((section) => {
             const recordKey = getStudentRecordKey(section.id, selectedStudentId)
             const remoteContent = rowsBySectionId.get(section.id)
 
@@ -1467,7 +1719,7 @@ function SchoolLifeRecordsInput({
         return
       }
 
-      recordSections.forEach((section) => {
+      allRecordSections.forEach((section) => {
         const cachedContent =
           recordValuesRef.current[
             getStudentRecordKey(section.id, selectedStudentId)
@@ -1489,6 +1741,72 @@ function SchoolLifeRecordsInput({
       isMounted = false
     }
   }, [persistRemoteRecordValue, selectedStudentId, showRemoteStorageError])
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadClassRecordValues() {
+      if (
+        inputMode !== SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS ||
+        !activeClassGrade ||
+        !activeClassNum ||
+        !selectedClassStudentIds.length
+      ) {
+        return
+      }
+
+      const { data, error } = await fetchClassSchoolLifeRecordRows({
+        classNum: activeClassNum,
+        grade: activeClassGrade,
+        schoolYear: DEFAULT_ACTIVITY_YEAR,
+        studentIds: selectedClassStudentIds,
+      })
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        showRemoteStorageError(error)
+        return
+      }
+
+      const remoteRows = data ?? []
+
+      if (!remoteRows.length) {
+        return
+      }
+
+      setRecordValues((previous) => {
+        const nextRecordValues = { ...previous }
+
+        remoteRows.forEach((row) => {
+          const recordKey = getStudentRecordKey(row.section_id, row.student_id)
+
+          if (row.content?.trim()) {
+            nextRecordValues[recordKey] = row.content
+          } else {
+            delete nextRecordValues[recordKey]
+          }
+        })
+
+        return nextRecordValues
+      })
+    }
+
+    void loadClassRecordValues()
+
+    return () => {
+      isMounted = false
+    }
+  }, [
+    activeClassGrade,
+    activeClassNum,
+    inputMode,
+    selectedClassStudentIdKey,
+    selectedClassStudentIds,
+    showRemoteStorageError,
+  ])
 
   function getRecordKey(sectionId) {
     return getStudentRecordKey(sectionId, selectedStudentId)
@@ -1512,9 +1830,8 @@ function SchoolLifeRecordsInput({
     }, 700)
   }
 
-  function updateRecordValue(sectionId, value) {
-    const recordKey = getRecordKey(sectionId)
-    const recordStudentId = selectedStudentId
+  function updateRecordValueForStudent(studentId, sectionId, value) {
+    const recordKey = getStudentRecordKey(sectionId, studentId)
 
     setRecordValues((previous) => {
       const nextRecordValues = { ...previous }
@@ -1528,7 +1845,11 @@ function SchoolLifeRecordsInput({
       return nextRecordValues
     })
 
-    scheduleRemoteRecordSave(recordStudentId, sectionId, value)
+    scheduleRemoteRecordSave(studentId, sectionId, value)
+  }
+
+  function updateRecordValue(sectionId, value) {
+    updateRecordValueForStudent(selectedStudentId, sectionId, value)
   }
 
   function updateActivityText(value) {
@@ -1550,26 +1871,28 @@ function SchoolLifeRecordsInput({
     currentText,
     selectedActivityRows = [],
     diversityInstruction = '',
+    targetStudent = selectedStudent,
+    targetSchoolLifeQualities = schoolLifeQualities,
   ) {
     const memo = currentText.trim()
-    const studentContext = `${selectedStudent.grade}학년 ${selectedStudent.class_num}반 ${selectedStudent.student_num}번`
+    const studentContext = `${targetStudent.grade}학년 ${targetStudent.class_num}반 ${targetStudent.student_num}번`
     const isSelfGovernmentSection = section.id === SELF_GOVERNMENT_SECTION_ID
     const originalSelectedQualities = [
-      ...(schoolLifeQualities.competencies ?? []),
-      ...(schoolLifeQualities.characters ?? []),
+      ...(targetSchoolLifeQualities.competencies ?? []),
+      ...(targetSchoolLifeQualities.characters ?? []),
     ]
     const selectedCompetencies = isSelfGovernmentSection
       ? filterQualitiesBySelectedActivities(
-          schoolLifeQualities.competencies ?? [],
+          targetSchoolLifeQualities.competencies ?? [],
           selectedActivityRows,
         )
-      : schoolLifeQualities.competencies ?? []
+      : targetSchoolLifeQualities.competencies ?? []
     const selectedCharacters = isSelfGovernmentSection
       ? filterQualitiesBySelectedActivities(
-          schoolLifeQualities.characters ?? [],
+          targetSchoolLifeQualities.characters ?? [],
           selectedActivityRows,
         )
-      : schoolLifeQualities.characters ?? []
+      : targetSchoolLifeQualities.characters ?? []
     const qualityRestrictionInstructions =
       getQualityRestrictionInstructions(originalSelectedQualities)
     const qualityContext = [
@@ -1611,6 +1934,9 @@ function SchoolLifeRecordsInput({
         : '',
       isSelfGovernmentSection
         ? '같은 마무리 문장이나 같은 표현을 학생마다 반복하지 말고, 선택된 역량과 품성에 따라 문장 전개와 결론이 분명히 달라지게 쓰세요.'
+        : '',
+      isSelfGovernmentSection
+        ? '"활동 내용을 자신의 생활과 연결하며", "배운 내용을 생활 속 태도로 이어 가는", "이후 활동 내용을 다시 확인하며" 같은 표현은 사용하지 마세요.'
         : '',
       isSelfGovernmentSection
         ? '마지막 문장은 반드시 자연스러운 서술어로 끝내고, "그치함", "핵심함"처럼 단어가 잘린 표현이 나오지 않게 하세요.'
@@ -1668,6 +1994,21 @@ function SchoolLifeRecordsInput({
     return cleanGeneratedRecordText(data.text)
   }
 
+  function isValidSelfGovernmentGeneratedText(
+    text,
+    selectedActivityRows,
+    selectedQualityWords,
+  ) {
+    return (
+      isLikelyKoreanRecordText(text, true) &&
+      isGeneratedRecordGroundedInActivities(text, selectedActivityRows) &&
+      isGeneratedRecordStructuredByActivityPairs(text, selectedActivityRows) &&
+      !hasMechanicalQualityLabeling(text, selectedQualityWords) &&
+      !hasRepeatedGenericClosing(text) &&
+      !hasBrokenRecordEnding(text)
+    )
+  }
+
   async function handleGenerateRecord(section) {
     if (!selectedStudent) {
       return
@@ -1716,20 +2057,11 @@ function SchoolLifeRecordsInput({
       const isValidGeneratedText = (text) =>
         isLikelyKoreanRecordText(text, isSelfGovernmentSection) &&
         (!isSelfGovernmentSection ||
-          (isGeneratedRecordGroundedInActivities(
+          isValidSelfGovernmentGeneratedText(
             text,
             selectedActivityRows,
-          ) &&
-            isGeneratedRecordStructuredByActivityPairs(
-              text,
-              selectedActivityRows,
-            ) &&
-            !hasMechanicalQualityLabeling(
-              text,
-              selectedQualityWords,
-            ) &&
-            !hasRepeatedGenericClosing(text) &&
-            !hasBrokenRecordEnding(text)))
+            selectedQualityWords,
+          ))
 
       let bestCandidate = null
       let bestSimilarityResult = {
@@ -1873,12 +2205,300 @@ function SchoolLifeRecordsInput({
     }
   }
 
+  function getBatchQualityOptions() {
+    const optionCount =
+      (schoolLifeQualityOptions.competencies ?? []).length +
+      (schoolLifeQualityOptions.characters ?? []).length
+
+    return optionCount ? schoolLifeQualityOptions : schoolLifeQualities
+  }
+
+  function getSelectedQualityWordsForActivities(
+    qualitySelection,
+    selectedActivityRows,
+  ) {
+    const allowedQualities = getAllowedSchoolLifeQualitiesForActivities(
+      qualitySelection,
+      selectedActivityRows,
+    )
+
+    return [
+      ...allowedQualities.competencies,
+      ...allowedQualities.characters,
+    ]
+  }
+
+  function getCurrentClassComparableRows(sectionId) {
+    return selectedClassStudents
+      .map((student) => ({
+        content:
+          recordValuesRef.current[getStudentRecordKey(sectionId, student.id)] ??
+          '',
+        student_id: student.id,
+      }))
+      .filter((row) => row.content.trim())
+  }
+
+  function createFallbackClassSelfGovernmentCandidate(
+    comparableRows,
+    initialActivityRows,
+    initialQualitySelection,
+  ) {
+    let bestCandidate = {
+      activityRows: initialActivityRows,
+      qualitySelection: initialQualitySelection,
+      similarityResult: {
+        isTooSimilar: true,
+        maxScore: Number.POSITIVE_INFINITY,
+        topMatches: [],
+      },
+      text: '',
+    }
+
+    for (let attempt = 0; attempt < 14; attempt += 1) {
+      const candidateActivityRows =
+        attempt === 0 ? initialActivityRows : getRandomActivityRows(activityRows)
+      const candidateQualitySelection =
+        attempt === 0
+          ? initialQualitySelection
+          : getRandomSchoolLifeQualitySelection(getBatchQualityOptions(), 7, 12)
+      const selectedQualityWords = getSelectedQualityWordsForActivities(
+        candidateQualitySelection,
+        candidateActivityRows,
+      )
+      const candidateText = buildSelfGovernmentFallbackRecord(
+        candidateActivityRows,
+        candidateQualitySelection,
+      )
+
+      if (
+        !isValidSelfGovernmentGeneratedText(
+          candidateText,
+          candidateActivityRows,
+          selectedQualityWords,
+        )
+      ) {
+        continue
+      }
+
+      const similarityResult = getRecordSimilarityResult(
+        candidateText,
+        comparableRows,
+      )
+
+      if (
+        !bestCandidate.text ||
+        similarityResult.maxScore < bestCandidate.similarityResult.maxScore
+      ) {
+        bestCandidate = {
+          activityRows: candidateActivityRows,
+          qualitySelection: candidateQualitySelection,
+          similarityResult,
+          text: candidateText,
+        }
+      }
+
+      if (!similarityResult.isTooSimilar) {
+        break
+      }
+    }
+
+    return bestCandidate
+  }
+
+  async function handleGenerateClassSelfGovernmentRecords() {
+    if (
+      classSelectedSection.id !== SELF_GOVERNMENT_SECTION_ID ||
+      !selectedClassStudents.length
+    ) {
+      return
+    }
+
+    setSectionGenerationState(classGenerationStateKey, true)
+
+    const existingComparableRows = getCurrentClassComparableRows(
+      SELF_GOVERNMENT_SECTION_ID,
+    )
+    const generatedRows = []
+    const nextQualitySelectionsByStudentId = {}
+    let tooSimilarCount = 0
+
+    try {
+      for (const student of selectedClassStudents) {
+        const generatedStudentIds = new Set(
+          generatedRows.map((row) => row.student_id),
+        )
+        const comparableRows = [
+          ...existingComparableRows.filter(
+            (row) =>
+              row.student_id !== student.id &&
+              !generatedStudentIds.has(row.student_id),
+          ),
+          ...generatedRows,
+        ]
+        const recordKey = getStudentRecordKey(
+          SELF_GOVERNMENT_SECTION_ID,
+          student.id,
+        )
+        const currentText = recordValuesRef.current[recordKey] ?? ''
+        const selectedActivityRows = getRandomActivityRows(activityRows)
+        const qualitySelection = getRandomSchoolLifeQualitySelection(
+          getBatchQualityOptions(),
+          7,
+          12,
+        )
+        const selectedQualityWords = getSelectedQualityWordsForActivities(
+          qualitySelection,
+          selectedActivityRows,
+        )
+        let bestCandidate = {
+          activityRows: selectedActivityRows,
+          qualitySelection,
+          similarityResult: {
+            isTooSimilar: true,
+            maxScore: Number.POSITIVE_INFINITY,
+            topMatches: [],
+          },
+          text: '',
+        }
+        let diversityInstruction = ''
+
+        for (
+          let attempt = 0;
+          attempt <= MAX_DIVERSITY_REPAIR_ATTEMPTS;
+          attempt += 1
+        ) {
+          let generatedText = ''
+
+          try {
+            generatedText = await requestGeneratedRecordText(
+              createRecordPrompt(
+                classSelectedSection,
+                currentText,
+                selectedActivityRows,
+                diversityInstruction,
+                student,
+                qualitySelection,
+              ),
+            )
+          } catch {
+            break
+          }
+
+          if (
+            !isValidSelfGovernmentGeneratedText(
+              generatedText,
+              selectedActivityRows,
+              selectedQualityWords,
+            )
+          ) {
+            continue
+          }
+
+          const similarityResult = getRecordSimilarityResult(
+            generatedText,
+            comparableRows,
+          )
+
+          if (
+            !bestCandidate.text ||
+            similarityResult.maxScore < bestCandidate.similarityResult.maxScore
+          ) {
+            bestCandidate = {
+              activityRows: selectedActivityRows,
+              qualitySelection,
+              similarityResult,
+              text: generatedText,
+            }
+          }
+
+          if (!similarityResult.isTooSimilar) {
+            break
+          }
+
+          diversityInstruction = createDiversityInstruction(
+            generatedText,
+            similarityResult,
+            attempt + 1,
+          )
+        }
+
+        if (!bestCandidate.text || bestCandidate.similarityResult.isTooSimilar) {
+          const fallbackCandidate = createFallbackClassSelfGovernmentCandidate(
+            comparableRows,
+            selectedActivityRows,
+            qualitySelection,
+          )
+
+          if (
+            fallbackCandidate.text &&
+            (!bestCandidate.text ||
+              fallbackCandidate.similarityResult.maxScore <
+                bestCandidate.similarityResult.maxScore)
+          ) {
+            bestCandidate = fallbackCandidate
+          }
+        }
+
+        if (!bestCandidate.text) {
+          bestCandidate = createFallbackClassSelfGovernmentCandidate(
+            comparableRows,
+            selectedActivityRows,
+            qualitySelection,
+          )
+        }
+
+        if (!bestCandidate.text) {
+          continue
+        }
+
+        if (bestCandidate.similarityResult.isTooSimilar) {
+          tooSimilarCount += 1
+        }
+
+        updateRecordValueForStudent(
+          student.id,
+          SELF_GOVERNMENT_SECTION_ID,
+          bestCandidate.text,
+        )
+        recordValuesRef.current = {
+          ...recordValuesRef.current,
+          [recordKey]: bestCandidate.text,
+        }
+        generatedRows.push({
+          content: bestCandidate.text,
+          student_id: student.id,
+        })
+        nextQualitySelectionsByStudentId[student.id] =
+          bestCandidate.qualitySelection
+      }
+
+      if (Object.keys(nextQualitySelectionsByStudentId).length) {
+        onSchoolLifeQualitySelectionsChange?.(nextQualitySelectionsByStudentId)
+      }
+
+      const completedCount = generatedRows.length
+      const similarityMessage = tooSimilarCount
+        ? ` ${tooSimilarCount}명은 가장 낮은 유사도 후보를 적용했습니다.`
+        : ' 유사도 50% 이하 기준으로 보정했습니다.'
+
+      onToast?.(
+        `${classLabel} ${completedCount}명 자율자치 활동을 생성했습니다.${similarityMessage}`,
+      )
+    } finally {
+      setSectionGenerationState(classGenerationStateKey, false)
+    }
+  }
+
   if (!selectedStudent) {
     return null
   }
 
   return (
     <section className="detail-section school-life-records-shell">
+      {inputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL ? (
+        <>
+          {isPersonalSelfGovernmentSection ? (
       <section className="school-life-records-activity-card">
         <div className="school-life-records-activity-card__header">
           <div>
@@ -1895,10 +2515,20 @@ function SchoolLifeRecordsInput({
               type="button"
               onClick={() => setIsActivityEditorOpen((previous) => !previous)}
             >
-              {isActivityEditorOpen ? '접기' : '펼치기'}
+              {isActivityEditorOpen ? '접기' : '편집'}
             </button>
           </div>
         </div>
+
+        {!isActivityEditorOpen ? (
+          <p className="school-life-records-activity-compact-summary">
+            {activityRows.length
+              ? `${activityRows[0].date ? `${activityRows[0].date} · ` : ''}${
+                  activityRows[0].content
+                }${activityRows.length > 1 ? ` 외 ${activityRows.length - 1}개` : ''}`
+              : '활동자료를 등록하면 Gemini 생성에 반영됩니다.'}
+          </p>
+        ) : null}
 
         {isActivityEditorOpen ? (
           <label className="school-life-records-activity-field">
@@ -1911,12 +2541,12 @@ function SchoolLifeRecordsInput({
           </label>
         ) : null}
 
-        {activityRows.length ? (
+        {isActivityEditorOpen && activityRows.length ? (
           <div
             className="school-life-records-activity-preview"
             aria-label="자율자치 활동자료 미리보기"
           >
-            {activityRows.slice(0, 6).map((activity, index) => (
+            {activityRows.slice(0, 3).map((activity, index) => (
               <div
                 className="school-life-records-activity-preview__row"
                 key={`${activity.date}-${activity.content}-${index}`}
@@ -1925,57 +2555,167 @@ function SchoolLifeRecordsInput({
                 <strong>{activity.content}</strong>
               </div>
             ))}
-            {activityRows.length > 6 ? (
+            {activityRows.length > 3 ? (
               <p className="school-life-records-activity-preview__more">
-                외 {activityRows.length - 6}개
+                외 {activityRows.length - 3}개
               </p>
             ) : null}
           </div>
         ) : null}
       </section>
+          ) : null}
 
       <div className="school-life-records-fields" aria-label="학교생활기록부 입력">
-        {recordSections.map((section) => {
-          const recordKey = getRecordKey(section.id)
+        <section
+          className="school-life-records-field-card"
+          key={personalSelectedSection.id}
+        >
+          <div className="school-life-records-field-card__header">
+            <h2>{personalSelectedSection.label}</h2>
+          </div>
 
-          return (
-            <section className="school-life-records-field-card" key={section.id}>
-              <div className="school-life-records-field-card__header">
-                <h2>{section.label}</h2>
-              </div>
+          <label className="school-life-records-field">
+            <span className="visually-hidden">
+              {selectedStudent.name} {personalSelectedSection.label}
+            </span>
+            <textarea
+              maxLength={
+                personalSelectedSection.id === SELF_GOVERNMENT_SECTION_ID
+                  ? SELF_GOVERNMENT_MAX_LENGTH
+                  : undefined
+              }
+              value={
+                recordValues[getRecordKey(personalSelectedSection.id)] ?? ''
+              }
+              onChange={(event) =>
+                updateRecordValue(
+                  personalSelectedSection.id,
+                  event.target.value,
+                )
+              }
+              placeholder={personalSelectedSection.placeholder}
+            />
+          </label>
 
-              <label className="school-life-records-field">
-                <span className="visually-hidden">
-                  {selectedStudent.name} {section.label}
-                </span>
-                <textarea
-                  maxLength={
-                    section.id === SELF_GOVERNMENT_SECTION_ID
-                      ? SELF_GOVERNMENT_MAX_LENGTH
-                      : undefined
-                  }
-                  value={recordValues[recordKey] ?? ''}
-                  onChange={(event) =>
-                    updateRecordValue(section.id, event.target.value)
-                  }
-                  placeholder={section.placeholder}
-                />
-              </label>
-
-              <div className="school-life-records-ai-actions">
-                <button
-                  className="school-life-records-ai-button"
-                  type="button"
-                  onClick={() => handleGenerateRecord(section)}
-                  disabled={Boolean(generatingSectionIds[section.id])}
-                >
-                  {generatingSectionIds[section.id] ? '생성 중...' : 'Gemini 생성'}
-                </button>
-              </div>
-            </section>
-          )
-        })}
+          <div className="school-life-records-ai-actions">
+            <button
+              className="school-life-records-ai-button"
+              type="button"
+              onClick={() => handleGenerateRecord(personalSelectedSection)}
+              disabled={Boolean(generatingSectionIds[personalSelectedSection.id])}
+            >
+              {generatingSectionIds[personalSelectedSection.id]
+                ? '생성 중...'
+                : 'Gemini 생성'}
+            </button>
+          </div>
+        </section>
       </div>
+        </>
+      ) : null}
+
+      {inputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS ? (
+        <section className="school-life-records-class-card">
+          <div className="school-life-records-class-card__header">
+            <div>
+              <p className="section-label">전체 입력</p>
+              <h2>{classLabel}</h2>
+            </div>
+
+            {classSelectedSection.id === SELF_GOVERNMENT_SECTION_ID ? (
+              <button
+                className="school-life-records-ai-button school-life-records-ai-button--class"
+                type="button"
+                onClick={handleGenerateClassSelfGovernmentRecords}
+                disabled={
+                  isGeneratingClassSection || !selectedClassStudents.length
+                }
+              >
+                {isGeneratingClassSection
+                  ? '전체학생 생성 중...'
+                  : '전체학생 Gemini 생성'}
+              </button>
+            ) : (
+              <span className="school-life-records-activity-count">
+                {selectedClassStudents.length}명
+              </span>
+            )}
+          </div>
+
+          <div
+            className="school-life-records-section-tabs"
+            aria-label="전체 입력 항목 선택"
+            role="tablist"
+          >
+            {classRecordSections.map((section) => (
+              <button
+                aria-selected={classSectionId === section.id}
+                className={`school-life-records-section-tab ${
+                  classSectionId === section.id ? 'is-active' : ''
+                }`}
+                key={section.id}
+                role="tab"
+                type="button"
+                onClick={() => setClassSectionId(section.id)}
+              >
+                {section.label}
+              </button>
+            ))}
+          </div>
+
+          {selectedClassStudents.length ? (
+            <div
+              className="school-life-records-class-list"
+              aria-label={`${classLabel} 학생별 ${classSelectedSection.label} 입력`}
+            >
+              {selectedClassStudents.map((student) => {
+                const recordKey = getStudentRecordKey(
+                  classSelectedSection.id,
+                  student.id,
+                )
+
+                return (
+                  <section
+                    className="school-life-records-class-row"
+                    key={student.id}
+                  >
+                    <div className="school-life-records-class-row__header">
+                      <strong>{getStudentDisplayLabel(student)}</strong>
+                      <span>{classSelectedSection.label}</span>
+                    </div>
+
+                    <label className="school-life-records-field">
+                      <span className="visually-hidden">
+                        {student.name} {classSelectedSection.label}
+                      </span>
+                      <textarea
+                        maxLength={
+                          classSelectedSection.id === SELF_GOVERNMENT_SECTION_ID
+                            ? SELF_GOVERNMENT_MAX_LENGTH
+                            : undefined
+                        }
+                        value={recordValues[recordKey] ?? ''}
+                        onChange={(event) =>
+                          updateRecordValueForStudent(
+                            student.id,
+                            classSelectedSection.id,
+                            event.target.value,
+                          )
+                        }
+                        placeholder={classSelectedSection.placeholder}
+                      />
+                    </label>
+                  </section>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="school-life-records-class-empty">
+              선택한 학급의 학생이 없습니다.
+            </p>
+          )}
+        </section>
+      ) : null}
     </section>
   )
 }

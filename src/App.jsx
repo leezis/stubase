@@ -6,7 +6,15 @@ import CounselingForm, {
 import Dashboard from './features/dashboard/Dashboard.jsx'
 import EmergencyContacts from './features/emergency-contacts/EmergencyContacts.jsx'
 import personalGradeRecordsModule from './features/personal-grade-records/index.js'
-import SchoolLifeRecordsInput from './features/school-life-records/SchoolLifeRecordsInput.jsx'
+import {
+  PERSONAL_GRADE_RECORD_SCHOOL_YEAR,
+  mergePersonalGradeRecordData,
+} from './features/personal-grade-records/personalGradeRecordsData.js'
+import SchoolLifeRecordsInput, {
+  SELF_GOVERNMENT_SECTION_ID,
+  SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS,
+  SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL,
+} from './features/school-life-records/SchoolLifeRecordsInput.jsx'
 import Login from './features/auth/Login.jsx'
 import './App.css'
 import {
@@ -24,6 +32,9 @@ const COUNSELING_COUNT_PAGE_SIZE = 1000
 const APP_BUILD_LABEL = 'build 2026-04-21 b1'
 const PRODUCTION_SITE_URL = 'https://stubase.pages.dev/'
 const SCHOOL_LIFE_RECORDS_MODULE_ID = 'school-life-records-input'
+const SCHOOL_LIFE_CLUB_SECTION_ID = 'club'
+const SCHOOL_LIFE_FREE_SEMESTER_SUBJECT_SECTION_ID = 'free-semester-subject'
+const SCHOOL_LIFE_FREE_SEMESTER_CAREER_SECTION_ID = 'free-semester-career'
 
 const STUDENT_COMPETENCY_OPTIONS = [
   '의사소통',
@@ -41,6 +52,15 @@ const STUDENT_COMPETENCY_OPTIONS = [
   '실행력',
   '적응력',
   '표현력',
+  '공동체성',
+  '리더십',
+  '자기성찰',
+  '자료해석',
+  '디지털활용',
+  '윤리적 판단',
+  '계획수립',
+  '상황판단',
+  '협의조정',
 ]
 
 const STUDENT_CHARACTER_OPTIONS = [
@@ -59,24 +79,91 @@ const STUDENT_CHARACTER_OPTIONS = [
   '친절함',
   '신뢰감',
   '봉사정신',
+  '협동심',
+  '공정성',
+  '포용성',
+  '자율성',
+  '절제',
+  '겸손',
+  '관용',
+  '배려실천',
+  '약속이행',
 ]
 
 const SCHOOL_LIFE_QUALITY_GROUPS = [
   {
     id: 'competencies',
-    label: '학생역량',
+    label: '학생\n역량',
     options: STUDENT_COMPETENCY_OPTIONS,
   },
   {
     id: 'characters',
-    label: '품성',
+    label: '학생\n품성',
     options: STUDENT_CHARACTER_OPTIONS,
+  },
+]
+
+const SCHOOL_LIFE_PERSONAL_SECTION_OPTIONS = [
+  {
+    id: SELF_GOVERNMENT_SECTION_ID,
+    label: '자율자치 활동',
+  },
+  {
+    id: SCHOOL_LIFE_CLUB_SECTION_ID,
+    label: '동아리 활동',
+  },
+  {
+    id: 'career',
+    label: '진로 활동',
+  },
+  {
+    id: SCHOOL_LIFE_FREE_SEMESTER_SUBJECT_SECTION_ID,
+    label: '자유학기(주제선택)',
+  },
+  {
+    id: SCHOOL_LIFE_FREE_SEMESTER_CAREER_SECTION_ID,
+    label: '자유학기(진로선택)',
   },
 ]
 
 const emptySchoolLifeQualitySelection = {
   competencies: [],
   characters: [],
+}
+
+const emptySchoolLifeClubDepartments = {
+  clubActivity: '',
+  sportsClub: '',
+  autonomousClub: '',
+}
+
+const SCHOOL_LIFE_CLUB_DEPARTMENT_ITEMS = [
+  {
+    id: 'clubActivity',
+    label: '동아리활동 부서',
+  },
+  {
+    id: 'sportsClub',
+    label: '학교스포츠클럽 부서',
+  },
+  {
+    id: 'autonomousClub',
+    label: '자율동아리 부서',
+  },
+]
+
+function normalizeSchoolLifeClubDepartment(value) {
+  return String(value ?? '').trim()
+}
+
+function createSchoolLifeClubDepartments(recordData) {
+  const data = mergePersonalGradeRecordData(recordData)
+
+  return {
+    clubActivity: normalizeSchoolLifeClubDepartment(data.club.clubActivity.name),
+    sportsClub: normalizeSchoolLifeClubDepartment(data.club.clubActivity.className),
+    autonomousClub: normalizeSchoolLifeClubDepartment(data.club.autonomousClub.name),
+  }
 }
 
 function getRandomQualityOptions(options, minCount = 3, maxCount = 5) {
@@ -424,6 +511,17 @@ function App() {
   const [schoolWorkHeaderActions, setSchoolWorkHeaderActions] = useState(null)
   const [schoolLifeQualitySelections, setSchoolLifeQualitySelections] =
     useState({})
+  const [schoolLifeClubDepartmentResult, setSchoolLifeClubDepartmentResult] =
+    useState({
+      departments: emptySchoolLifeClubDepartments,
+      error: '',
+      studentId: null,
+    })
+  const [schoolLifeRecordInputMode, setSchoolLifeRecordInputMode] = useState(
+    SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL,
+  )
+  const [schoolLifeRecordPersonalSectionId, setSchoolLifeRecordPersonalSectionId] =
+    useState(SELF_GOVERNMENT_SECTION_ID)
   const [toastMessage, setToastMessage] = useState('')
   const [toastTone, setToastTone] = useState('info')
 
@@ -455,6 +553,33 @@ function App() {
     : selectedStudentId
   const isSchoolLifeRecordsInputView =
     activeSchoolWorkModule?.id === SCHOOL_LIFE_RECORDS_MODULE_ID
+  const isSchoolLifeSelfGovernmentInputSelected =
+    isSchoolLifeRecordsInputView &&
+    schoolLifeRecordInputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL &&
+    schoolLifeRecordPersonalSectionId === SELF_GOVERNMENT_SECTION_ID
+  const isSchoolLifeClubInputSelected =
+    isSchoolLifeRecordsInputView &&
+    schoolLifeRecordInputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL &&
+    schoolLifeRecordPersonalSectionId === SCHOOL_LIFE_CLUB_SECTION_ID
+  const shouldShowActiveStudentDetailHeader =
+    !isSchoolLifeRecordsInputView ||
+    schoolLifeRecordInputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL
+  const activeSchoolLifeClubDepartments =
+    schoolLifeClubDepartmentResult.studentId === activeWorkspaceSelectedStudentId
+      ? schoolLifeClubDepartmentResult.departments
+      : emptySchoolLifeClubDepartments
+  const isLoadingSchoolLifeClubDepartments =
+    isSchoolLifeClubInputSelected &&
+    Boolean(activeWorkspaceSelectedStudentId) &&
+    Boolean(supabase) &&
+    Boolean(authUserId) &&
+    schoolLifeClubDepartmentResult.studentId !== activeWorkspaceSelectedStudentId
+  const schoolLifeClubDepartmentsError =
+    isSchoolLifeClubInputSelected && (!supabase || !authUserId)
+      ? 'Supabase 연결 정보가 없어 동아리 부서를 불러올 수 없습니다.'
+      : schoolLifeClubDepartmentResult.studentId === activeWorkspaceSelectedStudentId
+        ? schoolLifeClubDepartmentResult.error
+        : ''
   const activeSchoolLifeQualitySelection = activeWorkspaceSelectedStudentId
     ? schoolLifeQualitySelections[activeWorkspaceSelectedStudentId] ??
       emptySchoolLifeQualitySelection
@@ -595,24 +720,51 @@ function App() {
     })
   }
 
-  function handleRandomSelectSchoolLifeQualities() {
+  function handleRandomSelectSchoolLifeQualityGroup(groupId) {
     const studentId = activeWorkspaceSelectedStudentId
+    const qualityGroup = SCHOOL_LIFE_QUALITY_GROUPS.find(
+      (group) => group.id === groupId,
+    )
 
-    if (!studentId) {
+    if (!studentId || !qualityGroup) {
       return
     }
 
-    setSchoolLifeQualitySelections((previous) => ({
-      ...previous,
-      [studentId]: {
-        competencies: getRandomQualityOptions(STUDENT_COMPETENCY_OPTIONS),
-        characters: getRandomQualityOptions(STUDENT_CHARACTER_OPTIONS),
-      },
-    }))
+    setSchoolLifeQualitySelections((previous) => {
+      const current = previous[studentId] ?? emptySchoolLifeQualitySelection
+
+      return {
+        ...previous,
+        [studentId]: {
+          ...emptySchoolLifeQualitySelection,
+          ...current,
+          [groupId]: getRandomQualityOptions(qualityGroup.options, 7, 10),
+        },
+      }
+    })
 
     showToast(
-      `${activeWorkspaceSelectedStudent?.name ?? '학생'} 학생의 역량과 품성을 랜덤 선택했습니다.`,
+      `${activeWorkspaceSelectedStudent?.name ?? '학생'} 학생의 ${qualityGroup.label.replace(/\s+/g, '')}을 랜덤 선택했습니다.`,
     )
+  }
+
+  function applySchoolLifeQualitySelectionsByStudent(nextSelectionsByStudentId) {
+    setSchoolLifeQualitySelections((previous) => {
+      const next = { ...previous }
+
+      Object.entries(nextSelectionsByStudentId ?? {}).forEach(
+        ([studentId, selection]) => {
+          next[studentId] = {
+            ...emptySchoolLifeQualitySelection,
+            ...(previous[studentId] ?? {}),
+            competencies: selection.competencies ?? [],
+            characters: selection.characters ?? [],
+          }
+        },
+      )
+
+      return next
+    })
   }
 
   function clearActiveWorkspaceSelectedStudent() {
@@ -1579,6 +1731,57 @@ function App() {
   }, [students])
 
   useEffect(() => {
+    if (
+      !isSchoolLifeClubInputSelected ||
+      !activeWorkspaceSelectedStudentId ||
+      !supabase ||
+      !authUserId
+    ) {
+      return
+    }
+
+    let isMounted = true
+
+    async function loadSchoolLifeClubDepartments() {
+      const { data, error } = await supabase
+        .from('personal_grade_records')
+        .select('data')
+        .eq('student_id', activeWorkspaceSelectedStudentId)
+        .eq('school_year', PERSONAL_GRADE_RECORD_SCHOOL_YEAR)
+        .maybeSingle()
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        setSchoolLifeClubDepartmentResult({
+          departments: emptySchoolLifeClubDepartments,
+          error: '개인내신성적관리부 동아리 자료를 불러오지 못했습니다.',
+          studentId: activeWorkspaceSelectedStudentId,
+        })
+        return
+      }
+
+      setSchoolLifeClubDepartmentResult({
+        departments: createSchoolLifeClubDepartments(data?.data ?? {}),
+        error: '',
+        studentId: activeWorkspaceSelectedStudentId,
+      })
+    }
+
+    void loadSchoolLifeClubDepartments()
+
+    return () => {
+      isMounted = false
+    }
+  }, [
+    activeWorkspaceSelectedStudentId,
+    authUserId,
+    isSchoolLifeClubInputSelected,
+  ])
+
+  useEffect(() => {
     const moduleId = activeSchoolWorkModule?.id
 
     if (
@@ -2389,9 +2592,133 @@ function App() {
                 </div>
               ) : (
                 <>
+                  {isSchoolLifeRecordsInputView ? (
+                    <div
+                      className="school-life-records-mode-tabs school-life-records-mode-tabs--profile-top"
+                      aria-label="학교생활기록부 입력 방식"
+                      role="tablist"
+                    >
+                      <button
+                        aria-selected={
+                          schoolLifeRecordInputMode ===
+                          SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL
+                        }
+                        className={`school-life-records-mode-tab ${
+                          schoolLifeRecordInputMode ===
+                          SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL
+                            ? 'is-active'
+                            : ''
+                        }`}
+                        role="tab"
+                        type="button"
+                        onClick={() =>
+                          setSchoolLifeRecordInputMode(
+                            SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL,
+                          )
+                        }
+                      >
+                        개인별 입력
+                      </button>
+                      <button
+                        aria-selected={
+                          schoolLifeRecordInputMode ===
+                          SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS
+                        }
+                        className={`school-life-records-mode-tab ${
+                          schoolLifeRecordInputMode ===
+                          SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS
+                            ? 'is-active'
+                            : ''
+                        }`}
+                        role="tab"
+                        type="button"
+                        onClick={() =>
+                          setSchoolLifeRecordInputMode(
+                            SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS,
+                          )
+                        }
+                      >
+                        전체 입력
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {isSchoolLifeRecordsInputView &&
+                  schoolLifeRecordInputMode ===
+                    SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL ? (
+                    <div
+                      className="school-life-records-section-tabs school-life-records-personal-section-tabs"
+                      aria-label="개인별 입력 항목 선택"
+                      role="tablist"
+                    >
+                      {SCHOOL_LIFE_PERSONAL_SECTION_OPTIONS.map((section) => (
+                        <button
+                          aria-selected={
+                            schoolLifeRecordPersonalSectionId === section.id
+                          }
+                          className={`school-life-records-section-tab ${
+                            schoolLifeRecordPersonalSectionId === section.id
+                              ? 'is-active'
+                              : ''
+                          }`}
+                          key={section.id}
+                          role="tab"
+                          type="button"
+                          onClick={() =>
+                            setSchoolLifeRecordPersonalSectionId(section.id)
+                          }
+                        >
+                          {section.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {shouldShowActiveStudentDetailHeader ? (
                   <div className="detail-header">
-                    <div className="detail-profile">
-                      {isCounselingView ? (
+                    <div
+                      className={`detail-profile ${
+                        isSchoolLifeRecordsInputView
+                          ? 'detail-profile--record-input'
+                          : ''
+                      } ${
+                        isSchoolLifeClubInputSelected
+                          ? 'detail-profile--club-input'
+                          : ''
+                      }`}
+                    >
+                      {isSchoolLifeRecordsInputView ? (
+                        <div className="detail-profile__identity-stack">
+                          <div className="detail-profile__avatar-button detail-profile__avatar-button--static">
+                            <div className="detail-profile__avatar">
+                              {getDisplayedStudentAvatarSrc(activeWorkspaceSelectedStudent) ? (
+                                <img
+                                  src={getDisplayedStudentAvatarSrc(activeWorkspaceSelectedStudent)}
+                                  alt={`${activeWorkspaceSelectedStudent.name} 프로필`}
+                                  className="detail-profile__avatar-image"
+                                />
+                              ) : (
+                                <span
+                                  className="detail-profile__fallback"
+                                  style={{
+                                    backgroundColor: getStudentAvatarTheme(activeWorkspaceSelectedStudent).background,
+                                    color: getStudentAvatarTheme(activeWorkspaceSelectedStudent).color,
+                                  }}
+                                >
+                                  {getStudentInitial(activeWorkspaceSelectedStudent)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <h2 className="detail-profile__caption">
+                            {activeWorkspaceSelectedStudent.grade}학년{' '}
+                            {activeWorkspaceSelectedStudent.class_num}반{' '}
+                            {activeWorkspaceSelectedStudent.student_num}번{' '}
+                            {activeWorkspaceSelectedStudent.name}
+                          </h2>
+                        </div>
+                      ) : isCounselingView ? (
                         <button
                           className="detail-profile__avatar-button"
                           type="button"
@@ -2452,6 +2779,44 @@ function App() {
                         </div>
                       )}
 
+                      {isSchoolLifeClubInputSelected ? (
+                        <div
+                          className="school-life-club-departments"
+                          aria-label="동아리 활동 부서 정보"
+                        >
+                          {SCHOOL_LIFE_CLUB_DEPARTMENT_ITEMS.map((item) => {
+                            const value =
+                              activeSchoolLifeClubDepartments[item.id]
+
+                            return (
+                              <div
+                                className={`school-life-club-department school-life-club-department--${item.id}`}
+                                key={item.id}
+                              >
+                                <span>{item.label}</span>
+                                <strong
+                                  className={`school-life-club-department__value ${
+                                    !isLoadingSchoolLifeClubDepartments && !value
+                                      ? 'is-empty'
+                                      : ''
+                                  }`}
+                                >
+                                  {isLoadingSchoolLifeClubDepartments
+                                    ? '불러오는 중...'
+                                    : value || '미입력'}
+                                </strong>
+                              </div>
+                            )
+                          })}
+
+                          {schoolLifeClubDepartmentsError ? (
+                            <p className="school-life-club-departments__error">
+                              {schoolLifeClubDepartmentsError}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+
                       {isCounselingView ? (
                         <input
                           ref={avatarFileInputRef}
@@ -2462,92 +2827,107 @@ function App() {
                         />
                       ) : null}
 
+                      {!isSchoolLifeRecordsInputView ||
+                      isSchoolLifeSelfGovernmentInputSelected ? (
                       <div className="detail-profile__copy">
-                        <h2>
-                          {activeWorkspaceSelectedStudent.grade}학년{' '}
-                          {activeWorkspaceSelectedStudent.class_num}반{' '}
-                          {activeWorkspaceSelectedStudent.student_num}번{' '}
-                          {activeWorkspaceSelectedStudent.name}
-                        </h2>
-                        {isSchoolLifeRecordsInputView ? (
-                          <div
-                            className="student-quality-picker"
-                            aria-label="학생역량과 품성 선택"
-                          >
-                            {SCHOOL_LIFE_QUALITY_GROUPS.map((group) => (
-                              <div
-                                className="student-quality-picker__group"
-                                key={group.id}
-                              >
-                                <span className="student-quality-picker__label">
-                                  {group.label}
-                                </span>
-                                <div className="student-quality-picker__options">
-                                  {group.options.map((option) => {
-                                    const isSelected =
-                                      activeSchoolLifeQualitySelection[
-                                        group.id
-                                      ]?.includes(option) ?? false
+                        {!isSchoolLifeRecordsInputView ? (
+                          <h2>
+                            {activeWorkspaceSelectedStudent.grade}학년{' '}
+                            {activeWorkspaceSelectedStudent.class_num}반{' '}
+                            {activeWorkspaceSelectedStudent.student_num}번{' '}
+                            {activeWorkspaceSelectedStudent.name}
+                          </h2>
+                        ) : null}
+                        {isSchoolLifeSelfGovernmentInputSelected ? (
+                          <div className="student-quality-picker-panel">
+                            <div
+                              className="student-quality-picker"
+                              aria-label="학생역량과 품성 선택"
+                            >
+                              {SCHOOL_LIFE_QUALITY_GROUPS.map((group) => (
+                                <div
+                                  className={`student-quality-picker__group student-quality-picker__group--${group.id}`}
+                                  key={group.id}
+                                >
+                                  <button
+                                    className="student-quality-picker__label"
+                                    type="button"
+                                    aria-label={`${group.label.replace(/\s+/g, '')} 랜덤 선택`}
+                                    onClick={() =>
+                                      handleRandomSelectSchoolLifeQualityGroup(
+                                        group.id,
+                                      )
+                                    }
+                                  >
+                                    {group.label}
+                                  </button>
+                                  <div
+                                    className={`student-quality-picker__options student-quality-picker__options--${group.id}`}
+                                  >
+                                    {group.options.map((option) => {
+                                      const isSelected =
+                                        activeSchoolLifeQualitySelection[
+                                          group.id
+                                        ]?.includes(option) ?? false
 
-                                    return (
-                                      <button
-                                        className={`student-quality-picker__button student-quality-picker__button--${group.id} ${
-                                          isSelected ? 'is-selected' : ''
-                                        }`}
-                                        type="button"
-                                        key={option}
-                                        aria-pressed={isSelected}
-                                        onClick={() =>
-                                          toggleSchoolLifeQualitySelection(
-                                            group.id,
-                                            option,
-                                          )
-                                        }
-                                      >
-                                        {option}
-                                      </button>
-                                    )
-                                  })}
+                                      return (
+                                        <button
+                                          className={`student-quality-picker__button student-quality-picker__button--${group.id} ${
+                                            isSelected ? 'is-selected' : ''
+                                          }`}
+                                          type="button"
+                                          key={option}
+                                          aria-pressed={isSelected}
+                                          onClick={() =>
+                                            toggleSchoolLifeQualitySelection(
+                                              group.id,
+                                              option,
+                                            )
+                                          }
+                                        >
+                                          {option}
+                                        </button>
+                                      )
+                                    })}
+                                  </div>
                                 </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
                         ) : null}
                       </div>
+                      ) : null}
                     </div>
 
-                    <div className="detail-profile__actions">
-                      {isCounselingView ? (
-                        <button
-                          className="ghost-button camera-button"
-                          type="button"
-                          onClick={openAvatarFilePicker}
-                          disabled={isUploadingAvatar}
-                        >
-                          {isUploadingAvatar ? '업로드 중...' : '📷 카메라'}
-                        </button>
-                      ) : null}
-                      {schoolWorkHeaderActions ? (
-                        schoolWorkHeaderActions
-                      ) : isSchoolLifeRecordsInputView ? (
-                        <button
-                          className="ghost-button"
-                          type="button"
-                          onClick={handleRandomSelectSchoolLifeQualities}
-                        >
-                          랜덤선택
-                        </button>
-                      ) : (
-                        <button
-                          className="ghost-button"
-                          type="button"
-                          onClick={clearActiveWorkspaceSelectedStudent}
-                        >
-                          선택 해제
-                        </button>
-                      )}
-                    </div>
+                    {isCounselingView ||
+                    schoolWorkHeaderActions ||
+                    !isSchoolLifeRecordsInputView ? (
+                      <div className="detail-profile__actions">
+                        {isCounselingView ? (
+                          <button
+                            className="ghost-button camera-button"
+                            type="button"
+                            onClick={openAvatarFilePicker}
+                            disabled={isUploadingAvatar}
+                          >
+                            {isUploadingAvatar ? '업로드 중...' : '📷 카메라'}
+                          </button>
+                        ) : null}
+                        {schoolWorkHeaderActions ? (
+                          schoolWorkHeaderActions
+                        ) : (
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={clearActiveWorkspaceSelectedStudent}
+                          >
+                            선택 해제
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
+                  ) : null}
 
                   {isCounselingView ? (
                     <section className="detail-section">
@@ -2571,9 +2951,22 @@ function App() {
                   ) : ActiveSchoolWorkModule ? (
                     <ActiveSchoolWorkModule
                       dataRefreshKey={activeSchoolWorkDataRefreshKey}
+                      inputMode={schoolLifeRecordInputMode}
                       onHeaderActionsChange={setSchoolWorkHeaderActions}
+                      onSchoolLifeQualitySelectionsChange={
+                        applySchoolLifeQualitySelectionsByStudent
+                      }
                       onToast={showToast}
-                      schoolLifeQualities={activeSchoolLifeQualitySelection}
+                      personalSectionId={schoolLifeRecordPersonalSectionId}
+                      schoolLifeQualities={
+                        isSchoolLifeSelfGovernmentInputSelected
+                          ? activeSchoolLifeQualitySelection
+                          : emptySchoolLifeQualitySelection
+                      }
+                      schoolLifeQualityOptions={{
+                        competencies: STUDENT_COMPETENCY_OPTIONS,
+                        characters: STUDENT_CHARACTER_OPTIONS,
+                      }}
                       selectedClass={activeSelectedClass}
                       selectedGrade={activeSelectedGrade}
                       selectedStudent={activeWorkspaceSelectedStudent}

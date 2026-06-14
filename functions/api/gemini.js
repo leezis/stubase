@@ -70,6 +70,10 @@ function isLikelyKoreanRecordText(text, prompt = '') {
   const hasCompleteEnding = /[.!?。]$/u.test(normalizedText)
   const hasBrokenEnding =
     /(?:그치함|핵심함|바탕함|연결함|태도함|모습함|내용함)\.?$/u.test(compactText)
+  const hasRepeatedGenericExpression =
+    compactText.includes('활동내용을자신의생활과연결하며') ||
+    compactText.includes('배운내용을생활속태도로이어가는') ||
+    compactText.includes('이후활동내용을다시확인하며')
   const hasInstructionLeak =
     /\b(showing|conclude|conclusion|write|student|record|activity|empathy|kindness|conflict|resolution|politeness|March|semester)\b/i.test(
       normalizedText,
@@ -81,6 +85,7 @@ function isLikelyKoreanRecordText(text, prompt = '') {
     latinCount <= Math.max(12, Math.floor(koreanCount * 0.08)) &&
     hasCompleteEnding &&
     !hasBrokenEnding &&
+    !hasRepeatedGenericExpression &&
     !hasInstructionLeak
   )
 }
@@ -101,6 +106,7 @@ function createGeminiPayload(prompt) {
               '활동명이 주어진 요청에서는 활동명과 직접 관련된 교육 내용, 대처 방법, 실천 태도를 중심으로 쓰고 관련 없는 품성어로 내용을 채우지 마세요.',
               '"협업을 바탕으로", "적응력을 바탕으로"처럼 역량명만 바꿔 붙이는 표현을 쓰지 말고, 해당 역량이 드러나는 구체적 행동으로 풀어 쓰세요.',
               '학생마다 같은 마무리 문장을 반복하지 말고 활동과 역량에 맞는 다른 결론으로 마무리하세요.',
+              '"활동 내용을 자신의 생활과 연결하며", "배운 내용을 생활 속 태도로 이어 가는", "이후 활동 내용을 다시 확인하며" 같은 반복 표현을 쓰지 마세요.',
               '마지막 문장은 반드시 자연스러운 서술어로 끝내고 단어가 중간에서 끊긴 문장을 출력하지 마세요.',
               isLongRecordPrompt(prompt)
                 ? '최종 출력은 공백 포함 반드시 350자 이상 450자 이하로 작성하세요. 349자 이하와 451자 이상은 실패입니다.'

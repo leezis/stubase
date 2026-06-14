@@ -546,6 +546,35 @@
   min-width: 0;
 }
 
+.detail-profile--record-input {
+  align-items: flex-start;
+}
+
+.detail-profile--club-input {
+  align-items: stretch;
+  width: 100%;
+}
+
+.detail-profile__identity-stack {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: center;
+  gap: 8px;
+  max-width: 136px;
+}
+
+.detail-profile__caption {
+  margin: 0;
+  max-width: 136px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-align: center;
+  word-break: keep-all;
+}
+
 .detail-profile__avatar-button {
   flex: 0 0 auto;
   padding: 0;
@@ -579,6 +608,97 @@
   min-width: 0;
 }
 
+.school-life-club-departments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 8px;
+  align-self: stretch;
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  margin-block: 14px;
+}
+
+.school-life-club-department {
+  display: grid;
+  align-content: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 7px 14px;
+  border: 1px solid rgba(49, 130, 246, 0.18);
+  border-radius: 8px;
+  background: #f8fbff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 8px 18px rgba(15, 23, 42, 0.06);
+}
+
+.school-life-club-department span {
+  color: #475569;
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: 0;
+  text-align: center;
+  white-space: normal;
+  word-break: keep-all;
+}
+
+.school-life-club-department__value {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1.35;
+  letter-spacing: 0;
+  text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  overflow-wrap: anywhere;
+  word-break: keep-all;
+}
+
+.school-life-club-department__value.is-empty {
+  border-style: dashed;
+  background: rgba(248, 250, 252, 0.86);
+  color: #64748b;
+}
+
+.school-life-club-department--sportsClub {
+  border-color: rgba(16, 185, 129, 0.22);
+  background: #f6fefb;
+}
+
+.school-life-club-department--autonomousClub {
+  border-color: rgba(217, 119, 6, 0.22);
+  background: #fffaf0;
+}
+
+.school-life-club-departments__error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.student-quality-picker-panel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
 .student-quality-picker {
   display: grid;
   gap: 8px;
@@ -592,63 +712,167 @@
   min-width: 0;
 }
 
+.student-quality-picker__group--competencies,
+.student-quality-picker__group--characters {
+  align-items: stretch;
+}
+
 .student-quality-picker__label {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  flex: 0 0 68px;
+  width: 68px;
   min-height: 24px;
   padding: 0 8px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.06);
-  color: var(--muted);
-  font-size: 11px;
+  border: 1px solid rgba(49, 130, 246, 0.42);
+  border-radius: 12px;
+  background: rgba(49, 130, 246, 0.1);
+  color: #1d4ed8;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 3px 0 rgba(29, 78, 216, 0.18),
+    0 10px 18px rgba(49, 130, 246, 0.11);
+  font-family: inherit;
+  font-size: 18px;
   font-weight: 900;
-  line-height: 1;
-  white-space: nowrap;
+  line-height: 1.12;
+  text-align: center;
+  white-space: pre-line;
+  cursor: pointer;
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.student-quality-picker__group--characters .student-quality-picker__label {
+  border-color: rgba(217, 119, 6, 0.46);
+  background: rgba(251, 191, 36, 0.16);
+  color: #92400e;
+}
+
+.student-quality-picker__label:hover {
+  border-color: rgba(37, 99, 235, 0.58);
+  background: rgba(49, 130, 246, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 4px 0 rgba(29, 78, 216, 0.2),
+    0 12px 20px rgba(49, 130, 246, 0.14);
+  transform: translateY(-1px);
+}
+
+.student-quality-picker__group--characters .student-quality-picker__label:hover {
+  border-color: rgba(180, 83, 9, 0.62);
+  background: rgba(251, 191, 36, 0.24);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 4px 0 rgba(146, 64, 14, 0.2),
+    0 12px 20px rgba(217, 119, 6, 0.14);
+}
+
+.student-quality-picker__label:active {
+  box-shadow:
+    inset 0 2px 4px rgba(15, 23, 42, 0.1),
+    0 1px 0 rgba(29, 78, 216, 0.16),
+    0 6px 12px rgba(49, 130, 246, 0.1);
+  transform: translateY(2px);
 }
 
 .student-quality-picker__options {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
+.student-quality-picker__options--competencies,
+.student-quality-picker__options--characters {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(62px, 1fr));
+  grid-template-rows: repeat(3, minmax(26px, auto));
+  grid-auto-rows: minmax(26px, auto);
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
 .student-quality-picker__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 24px;
   padding: 0 9px;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 999px;
   background: #ffffff;
   color: var(--ink);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 0 rgba(100, 116, 139, 0.16),
+    0 7px 12px rgba(15, 23, 42, 0.06);
   font-family: inherit;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0;
-  line-height: 1;
+  line-height: 1.15;
+  text-align: center;
   white-space: nowrap;
   cursor: pointer;
   transition:
     border-color 0.16s ease,
     background-color 0.16s ease,
     box-shadow 0.16s ease,
-    color 0.16s ease;
+    color 0.16s ease,
+    transform 0.16s ease;
+}
+
+.student-quality-picker__options--competencies .student-quality-picker__button,
+.student-quality-picker__options--characters .student-quality-picker__button {
+  width: 100%;
+  min-width: 0;
+  padding: 0 6px;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .student-quality-picker__button:hover {
   border-color: rgba(49, 130, 246, 0.38);
-  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.96),
+    0 3px 0 rgba(100, 116, 139, 0.18),
+    0 9px 14px rgba(15, 23, 42, 0.09);
+  transform: translateY(-1px);
+}
+
+.student-quality-picker__button:active {
+  box-shadow:
+    inset 0 2px 4px rgba(15, 23, 42, 0.09),
+    0 1px 0 rgba(100, 116, 139, 0.14),
+    0 4px 8px rgba(15, 23, 42, 0.06);
+  transform: translateY(1px);
 }
 
 .student-quality-picker__button--competencies.is-selected {
   border-color: rgba(49, 130, 246, 0.42);
   background: rgba(49, 130, 246, 0.12);
   color: #1d4ed8;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 2px 0 rgba(29, 78, 216, 0.18),
+    0 8px 13px rgba(49, 130, 246, 0.12);
 }
 
 .student-quality-picker__button--characters.is-selected {
   border-color: rgba(217, 119, 6, 0.38);
   background: rgba(251, 191, 36, 0.18);
   color: #92400e;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    0 2px 0 rgba(146, 64, 14, 0.16),
+    0 8px 13px rgba(217, 119, 6, 0.12);
 }
 
 .detail-profile__fallback {
@@ -3558,6 +3782,25 @@
     width: 100%;
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .school-life-club-departments {
+    width: 100%;
+  }
+
+  .school-life-club-department {
+    min-height: 70px;
+    padding: 8px;
+  }
+
+  .school-life-club-department span {
+    font-size: 15px;
+  }
+
+  .school-life-club-department__value {
+    min-height: 30px;
+    padding: 6px 7px;
+    font-size: 14px;
   }
 
   .detail-profile__avatar {

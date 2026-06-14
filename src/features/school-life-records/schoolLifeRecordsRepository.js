@@ -76,6 +76,29 @@ export async function fetchComparableSchoolLifeRecordRows({
     .in('student_id', studentIds)
 }
 
+export async function fetchClassSchoolLifeRecordRows({
+  classNum,
+  grade,
+  schoolYear,
+  studentIds = [],
+}) {
+  if (!supabase || !grade || !classNum) {
+    return { data: [], error: null }
+  }
+
+  const targetStudentIds = studentIds.filter(Boolean)
+
+  if (!targetStudentIds.length) {
+    return { data: [], error: null }
+  }
+
+  return supabase
+    .from(SCHOOL_LIFE_RECORD_TABLE)
+    .select('student_id, section_id, content')
+    .eq('school_year', schoolYear)
+    .in('student_id', targetStudentIds)
+}
+
 export async function saveSchoolLifeRecordValue({
   content,
   schoolYear,
