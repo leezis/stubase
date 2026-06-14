@@ -1,8 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  fetchSchoolLifeRecordRows,
+  getSchoolLifeRecordErrorMessage,
+  saveSchoolLifeRecordValue,
+} from './schoolLifeRecordsRepository.js'
 import './SchoolLifeRecordsInput.css'
 
 const SELF_GOVERNMENT_SECTION_ID = 'self-government'
 const ACTIVITY_STORAGE_KEY = 'dsy-school-life-self-government-activities-v1'
+const RECORD_STORAGE_KEY = 'dsy-school-life-record-values-v1'
 const DEFAULT_ACTIVITY_YEAR = '2026'
 const SELF_GOVERNMENT_MIN_LENGTH = 400
 const SELF_GOVERNMENT_MAX_LENGTH = 450
@@ -375,11 +381,32 @@ function createInitialActivityTextsByClass() {
   }
 }
 
+function createInitialRecordValues() {
+  if (typeof window === 'undefined') {
+    return {}
+  }
+
+  try {
+    const savedValue = window.localStorage.getItem(RECORD_STORAGE_KEY)
+    const parsedValue = savedValue ? JSON.parse(savedValue) : {}
+
+    return parsedValue && typeof parsedValue === 'object' && !Array.isArray(parsedValue)
+      ? parsedValue
+      : {}
+  } catch {
+    return {}
+  }
+}
+
 function getClassActivityKey(selectedGrade, selectedClass, selectedStudent) {
   const grade = selectedGrade || selectedStudent?.grade || 'all'
   const classNum = selectedClass || selectedStudent?.class_num || 'all'
 
   return `${grade}-${classNum}`
+}
+
+function getStudentRecordKey(sectionId, studentId) {
+  return `${sectionId}:${studentId ?? 'empty'}`
 }
 
 function parseActivityRows(text) {
@@ -1003,7 +1030,7 @@ function SchoolLifeRecordsInput({
   selectedGrade = '',
   selectedStudent,
 }) {
-  const [recordValues, setRecordValues] = useState({})
+  const [recordValues, setRecordValues] = useState(createInitialRecordValues)
   const [generatingSectionIds, setGeneratingSectionIds] = useState({})
   const [activityTextsByClass, setActivityTextsByClass] = useState(
     createInitialActivityTextsByClass,
@@ -1019,12 +1046,50 @@ function SchoolLifeRecordsInput({
     () => sortActivityRowsByDate(parseActivityRows(activityText)),
     [activityText],
   )
+  const recordValuesRef = useRef(recordValues)
+  const remoteSaveTimersRef = useRef({})
+  const lastRemoteStorageErrorRef = useRef('')
+  const selectedStudentId = selectedStudent?.id ?? null
   const classLabel =
     selectedGrade || selectedClass
       ? `${selectedGrade || selectedStudent?.grade || ''}학년 ${
           selectedClass || selectedStudent?.class_num || ''
         }반`
       : '현재 학급'
+
+  const showRemoteStorageError = useCallback(
+    (error) => {
+      const message = getSchoolLifeRecordErrorMessage(error)
+
+      if (lastRemoteStorageErrorRef.current === message) {
+        return
+      }
+
+      lastRemoteStorageErrorRef.current = message
+      onToast?.(message, 'error')
+    },
+    [onToast],
+  )
+
+  const persistRemoteRecordValue = useCallback(
+    async (studentId, sectionId, value) => {
+      const { error } = await saveSchoolLifeRecordValue({
+        content: value,
+        schoolYear: DEFAULT_ACTIVITY_YEAR,
+        sectionId,
+        studentId,
+      })
+
+      if (error) {
+        showRemoteStorageError(error)
+      }
+    },
+    [showRemoteStorageError],
+  )
+
+  useEffect(() => {
+    recordValuesRef.current = recordValues
+  }, [recordValues])
 
   useEffect(() => {
     onHeaderActionsChange?.(null)
@@ -1045,15 +1110,133 @@ function SchoolLifeRecordsInput({
     )
   }, [activityTextsByClass])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(RECORD_STORAGE_KEY, JSON.stringify(recordValues))
+  }, [recordValues])
+
+  useEffect(() => {
+    return () => {
+      Object.values(remoteSaveTimersRef.current).forEach((timerId) => {
+        window.clearTimeout(timerId)
+      })
+      remoteSaveTimersRef.current = {}
+    }
+  }, [])
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadRemoteRecordValues() {
+      if (!selectedStudentId) {
+        return
+      }
+
+      const { data, error } = await fetchSchoolLifeRecordRows(
+        selectedStudentId,
+        DEFAULT_ACTIVITY_YEAR,
+      )
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        showRemoteStorageError(error)
+        return
+      }
+
+      const remoteRows = data ?? []
+
+      if (remoteRows.length) {
+        const rowsBySectionId = new Map(
+          remoteRows.map((row) => [row.section_id, row.content ?? '']),
+        )
+
+        setRecordValues((previous) => {
+          const nextRecordValues = { ...previous }
+
+          recordSections.forEach((section) => {
+            const recordKey = getStudentRecordKey(section.id, selectedStudentId)
+            const remoteContent = rowsBySectionId.get(section.id)
+
+            if (remoteContent?.trim()) {
+              nextRecordValues[recordKey] = remoteContent
+            } else {
+              delete nextRecordValues[recordKey]
+            }
+          })
+
+          return nextRecordValues
+        })
+        return
+      }
+
+      recordSections.forEach((section) => {
+        const cachedContent =
+          recordValuesRef.current[
+            getStudentRecordKey(section.id, selectedStudentId)
+          ] ?? ''
+
+        if (cachedContent.trim()) {
+          void persistRemoteRecordValue(
+            selectedStudentId,
+            section.id,
+            cachedContent,
+          )
+        }
+      })
+    }
+
+    void loadRemoteRecordValues()
+
+    return () => {
+      isMounted = false
+    }
+  }, [persistRemoteRecordValue, selectedStudentId, showRemoteStorageError])
+
   function getRecordKey(sectionId) {
-    return `${sectionId}:${selectedStudent?.id ?? 'empty'}`
+    return getStudentRecordKey(sectionId, selectedStudentId)
+  }
+
+  function scheduleRemoteRecordSave(studentId, sectionId, value) {
+    if (!studentId) {
+      return
+    }
+
+    const recordKey = getStudentRecordKey(sectionId, studentId)
+    const previousTimerId = remoteSaveTimersRef.current[recordKey]
+
+    if (previousTimerId) {
+      window.clearTimeout(previousTimerId)
+    }
+
+    remoteSaveTimersRef.current[recordKey] = window.setTimeout(() => {
+      delete remoteSaveTimersRef.current[recordKey]
+      void persistRemoteRecordValue(studentId, sectionId, value)
+    }, 700)
   }
 
   function updateRecordValue(sectionId, value) {
-    setRecordValues((previous) => ({
-      ...previous,
-      [getRecordKey(sectionId)]: value,
-    }))
+    const recordKey = getRecordKey(sectionId)
+    const recordStudentId = selectedStudentId
+
+    setRecordValues((previous) => {
+      const nextRecordValues = { ...previous }
+
+      if (value.trim()) {
+        nextRecordValues[recordKey] = value
+      } else {
+        delete nextRecordValues[recordKey]
+      }
+
+      return nextRecordValues
+    })
+
+    scheduleRemoteRecordSave(recordStudentId, sectionId, value)
   }
 
   function updateActivityText(value) {
