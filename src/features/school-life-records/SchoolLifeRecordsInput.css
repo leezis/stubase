@@ -363,6 +363,23 @@
   gap: 8px;
 }
 
+.school-life-records-class-card__actions--similarity {
+  flex: 0 1 min(100%, 640px);
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.school-life-records-section-tabs--similarity {
+  width: 100%;
+}
+
+.school-life-records-similarity-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .school-life-records-similarity-scope {
   display: inline-grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -416,10 +433,15 @@
 }
 
 .school-life-records-section-tabs--class {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.school-life-records-section-tabs--collapsed {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .school-life-records-personal-section-tabs {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 16px;
 }
 
@@ -451,6 +473,120 @@
   border-color: rgba(20, 184, 166, 0.36);
   background: #ecfdf5;
   color: #047857;
+}
+
+.school-life-records-subject-tabs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.school-life-records-subject-tabs--collapsed {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.school-life-records-subject-upload-actions {
+  display: flex;
+  grid-column: span 3;
+  gap: 6px;
+  min-width: 0;
+}
+
+.school-life-records-subject-tab {
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 9px;
+  background: #ffffff;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.school-life-records-subject-tab:hover {
+  color: var(--ink);
+}
+
+.school-life-records-subject-tab.is-active {
+  border-color: rgba(20, 184, 166, 0.34);
+  background: #ecfdf5;
+  color: #047857;
+  box-shadow: 0 3px 9px rgba(20, 184, 166, 0.1);
+}
+
+.school-life-records-subject-upload-button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(49, 130, 246, 0.26);
+  border-radius: 9px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.school-life-records-subject-upload-button:hover {
+  border-color: rgba(49, 130, 246, 0.42);
+  background: #dbeafe;
+}
+
+.school-life-records-subject-upload-button.is-active {
+  border-color: rgba(20, 184, 166, 0.36);
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.school-life-records-subject-upload-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.school-life-records-field-card > .school-life-records-subject-upload-actions {
+  margin-top: 6px;
+}
+
+.school-life-records-subject-evaluation-field {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 6px;
+  min-width: 0;
+}
+
+.school-life-records-subject-evaluation-field span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+
+.school-life-records-subject-evaluation-field textarea {
+  width: 100%;
+  min-height: 82px;
+  resize: vertical;
+  padding: 11px 12px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 11px;
+  background: #fbfdff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+}
+
+.school-life-records-subject-evaluation-field textarea:focus {
+  border-color: rgba(49, 130, 246, 0.5);
+  background: #ffffff;
+  box-shadow: 0 0 0 4px rgba(49, 130, 246, 0.1);
 }
 
 .school-life-records-club-filter {
@@ -859,6 +995,18 @@
 
   .school-life-records-section-tabs {
     grid-template-columns: 1fr;
+  }
+
+  .school-life-records-subject-tabs {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .school-life-records-subject-tabs--collapsed {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .school-life-records-subject-upload-actions {
+    grid-column: span 2;
   }
 
   .school-life-records-club-filter {

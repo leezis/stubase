@@ -550,6 +550,19 @@
   align-items: flex-start;
 }
 
+.detail-profile--record-input .detail-profile__identity-stack {
+  display: grid;
+  grid-template-columns: 136px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: start;
+  justify-items: stretch;
+  column-gap: 10px;
+  row-gap: 8px;
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: none;
+}
+
 .detail-profile--club-input {
   align-items: stretch;
   width: 100%;
@@ -563,6 +576,19 @@
   max-width: 136px;
 }
 
+.detail-profile__student-stack {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  max-width: 136px;
+}
+
+.detail-profile--record-input .detail-profile__student-stack {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
 .detail-profile__caption {
   margin: 0;
   max-width: 136px;
@@ -573,6 +599,60 @@
   letter-spacing: 0;
   text-align: center;
   word-break: keep-all;
+}
+
+.detail-profile__quality-inline {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  min-width: 0;
+  max-width: min(720px, calc(100vw - 280px));
+}
+
+.detail-profile__subject-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: min(720px, calc(100vw - 260px));
+  overflow-x: auto;
+  scrollbar-width: thin;
+  flex-wrap: nowrap;
+}
+
+.detail-profile--record-input .detail-profile__subject-buttons {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: end;
+}
+
+.detail-profile__subject-button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #eef6ff 100%);
+  box-shadow:
+    0 5px 12px rgba(37, 99, 235, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+  color: #1d4ed8;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.detail-profile__subject-button:hover {
+  border-color: rgba(37, 99, 235, 0.42);
+  transform: translateY(-1px);
+}
+
+.detail-profile__subject-button.is-active {
+  border-color: rgba(37, 99, 235, 0.58);
+  background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
 }
 
 .detail-profile__avatar-button {

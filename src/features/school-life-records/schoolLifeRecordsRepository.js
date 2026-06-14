@@ -1,6 +1,8 @@
 import { supabase } from '../../lib/supabase'
 
 const SCHOOL_LIFE_RECORD_TABLE = 'school_life_records'
+const SCHOOL_LIFE_SUBJECT_REFERENCE_TABLE = 'school_life_subject_references'
+const SCHOOL_LIFE_SUBJECT_REFERENCE_BUCKET = 'school-life-subject-references'
 const RECORD_QUERY_CHUNK_SIZE = 500
 const PERSONAL_GRADE_RECORD_TABLE = 'personal_grade_records'
 
@@ -43,6 +45,54 @@ function sortStudentsBySchoolNumber(students) {
 
     return leftValue - rightValue
   })
+}
+
+function sanitizeStoragePathSegment(value, fallback = 'file') {
+  const sanitizedValue = String(value ?? '')
+    .trim()
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .join('-')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  return sanitizedValue || fallback
+}
+
+function createSubjectReferenceStoragePath({
+  fileName,
+  referenceType,
+  schoolYear,
+  subjectId,
+}) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const safeFileName = sanitizeStoragePathSegment(fileName, 'reference.pdf')
+
+  return [
+    sanitizeStoragePathSegment(schoolYear, 'school-year'),
+    sanitizeStoragePathSegment(subjectId, 'subject'),
+    sanitizeStoragePathSegment(referenceType, 'reference'),
+    `${timestamp}-${safeFileName}`,
+  ].join('/')
+}
+
+function normalizeReferenceRow(row) {
+  if (!row) {
+    return null
+  }
+
+  return {
+    extracted_char_count: row.extracted_char_count ?? 0,
+    extracted_text: row.extracted_text ?? '',
+    file_name: row.file_name ?? '',
+    file_size: row.file_size ?? 0,
+    reference_type: row.reference_type ?? '',
+    school_year: row.school_year ?? '',
+    storage_path: row.storage_path ?? '',
+    subject_id: row.subject_id ?? '',
+    updated_at: row.updated_at ?? '',
+  }
 }
 
 async function fetchPersonalGradeRecordRows(schoolYear) {
@@ -156,6 +206,17 @@ export function getSchoolLifeRecordErrorMessage(error) {
   const message = String(error?.message ?? '')
 
   if (
+    message.includes('school_life_subject_references') ||
+    message.includes(SCHOOL_LIFE_SUBJECT_REFERENCE_BUCKET)
+  ) {
+    return '과목 참고자료 저장 공간이 아직 준비되지 않았습니다. Supabase SQL Editor에서 supabase-school-life-records.sql을 다시 실행해 주세요.'
+  }
+
+  if (message.includes('Bucket not found') || message.includes('bucket')) {
+    return '과목 참고자료 Storage 버킷을 찾지 못했습니다. Supabase SQL Editor에서 supabase-school-life-records.sql을 다시 실행해 주세요.'
+  }
+
+  if (
     message.includes('school_life_records') ||
     message.includes('relation') ||
     message.includes('does not exist')
@@ -184,6 +245,135 @@ export async function fetchSchoolLifeRecordRows(studentId, schoolYear) {
     .select('section_id, content')
     .eq('student_id', studentId)
     .eq('school_year', schoolYear)
+}
+
+export async function fetchSubjectAbilityReferenceRows({ schoolYear }) {
+  if (!supabase || !schoolYear) {
+    return { data: [], error: null }
+  }
+
+  const { data, error } = await supabase
+    .from(SCHOOL_LIFE_SUBJECT_REFERENCE_TABLE)
+    .select(
+      'school_year, subject_id, reference_type, file_name, file_size, storage_path, extracted_text, extracted_char_count, updated_at',
+    )
+    .eq('school_year', schoolYear)
+    .order('subject_id', { ascending: true })
+    .order('reference_type', { ascending: true })
+
+  return {
+    data: (data ?? []).map(normalizeReferenceRow).filter(Boolean),
+    error,
+  }
+}
+
+export async function saveSubjectAbilityReferenceFile({
+  extractedText,
+  file,
+  referenceType,
+  schoolYear,
+  subjectId,
+}) {
+  if (!supabase || !file || !schoolYear || !subjectId || !referenceType) {
+    return { data: null, error: null }
+  }
+
+  const storagePath = createSubjectReferenceStoragePath({
+    fileName: file.name,
+    referenceType,
+    schoolYear,
+    subjectId,
+  })
+
+  const { error: uploadError } = await supabase.storage
+    .from(SCHOOL_LIFE_SUBJECT_REFERENCE_BUCKET)
+    .upload(storagePath, file, {
+      cacheControl: '3600',
+      contentType: file.type || 'application/pdf',
+      upsert: true,
+    })
+
+  if (uploadError) {
+    return { data: null, error: uploadError }
+  }
+
+  const payload = {
+    content_type: file.type || 'application/pdf',
+    extracted_char_count: String(extractedText ?? '').length,
+    extracted_text: extractedText,
+    file_name: file.name,
+    file_size: file.size ?? 0,
+    reference_type: referenceType,
+    school_year: schoolYear,
+    storage_path: storagePath,
+    subject_id: subjectId,
+  }
+
+  const { data, error } = await supabase
+    .from(SCHOOL_LIFE_SUBJECT_REFERENCE_TABLE)
+    .upsert(payload, {
+      onConflict: 'school_year,subject_id,reference_type',
+    })
+    .select(
+      'school_year, subject_id, reference_type, file_name, file_size, storage_path, extracted_text, extracted_char_count, updated_at',
+    )
+    .single()
+
+  return {
+    data: normalizeReferenceRow(data),
+    error,
+  }
+}
+
+export async function saveSubjectAbilityReferenceText({
+  content,
+  referenceType,
+  schoolYear,
+  subjectId,
+}) {
+  if (!supabase || !schoolYear || !subjectId || !referenceType) {
+    return { data: null, error: null }
+  }
+
+  const text = String(content ?? '').trim()
+
+  if (!text) {
+    const { error } = await supabase
+      .from(SCHOOL_LIFE_SUBJECT_REFERENCE_TABLE)
+      .delete()
+      .eq('school_year', schoolYear)
+      .eq('subject_id', subjectId)
+      .eq('reference_type', referenceType)
+
+    return { data: null, error }
+  }
+
+  const payload = {
+    content_type: 'text/plain',
+    extracted_char_count: text.length,
+    extracted_text: text,
+    file_name: '직접 입력',
+    file_size: 0,
+    reference_type: referenceType,
+    school_year: schoolYear,
+    storage_path: '',
+    subject_id: subjectId,
+  }
+
+  const { data, error } = await supabase
+    .from(SCHOOL_LIFE_SUBJECT_REFERENCE_TABLE)
+    .upsert(payload, {
+      onConflict: 'school_year,subject_id,reference_type',
+    })
+    .select(
+      'school_year, subject_id, reference_type, file_name, file_size, storage_path, extracted_text, extracted_char_count, updated_at',
+    )
+    .single()
+
+  return {
+    data: normalizeReferenceRow(data),
+    error,
+  }
 }
 
 export async function fetchClassStudentRows({ classNum, grade }) {

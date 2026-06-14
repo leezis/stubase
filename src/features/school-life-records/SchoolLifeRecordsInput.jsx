@@ -14,14 +14,22 @@ import {
   fetchComparableSchoolLifeRecordRows,
   fetchSchoolLifeRecordRows,
   fetchSchoolLifeRecordComparisonRows,
+  fetchSubjectAbilityReferenceRows,
   getSchoolLifeRecordErrorMessage,
+  saveSubjectAbilityReferenceFile,
+  saveSubjectAbilityReferenceText,
   saveSchoolLifeRecordValue,
 } from './schoolLifeRecordsRepository.js'
+import {
+  extractPdfTextFromFile,
+  isPdfFile,
+} from './pdfTextExtractor.js'
 import './SchoolLifeRecordsInput.css'
 
 export const SELF_GOVERNMENT_SECTION_ID = 'self-government'
 const CLUB_SECTION_ID = 'club'
 const SPORTS_CLUB_SECTION_ID = 'sports-club'
+const SUBJECT_ABILITY_SECTION_ID = 'subject-ability'
 const ACTIVITY_STORAGE_KEY = 'dsy-school-life-self-government-activities-v1'
 const RECORD_STORAGE_KEY = 'dsy-school-life-record-values-v1'
 const DEFAULT_ACTIVITY_YEAR = '2026'
@@ -37,12 +45,58 @@ const SIMILARITY_HIGHLIGHT_MIN_COMPACT_LENGTH = 12
 const ACTIVITY_PHRASE_COMPARE_WINDOW = 180
 const MIN_REPEATED_ACTIVITY_PHRASE_LENGTH = 30
 const MAX_DIVERSITY_REPAIR_ATTEMPTS = 2
+const CLUB_DIVERSITY_REPAIR_ATTEMPTS = 4
 const SIMILARITY_SCOPE_CLASS = 'class'
 const SIMILARITY_SCOPE_GRADE = 'grade'
 const SIMILARITY_SCOPE_ALL = 'all'
+const SUBJECT_REFERENCE_TYPE_STANDARD = 'standard'
+const SUBJECT_REFERENCE_TYPE_LEVEL = 'level'
+const SUBJECT_REFERENCE_TYPE_EVALUATION = 'evaluation'
+const LEGACY_SUBJECT_REFERENCE_TYPE_ASSIGNMENT = 'assignment'
+const SUBJECT_REFERENCE_PROMPT_LIMIT = 5500
 export const SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL = 'personal'
 export const SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS = 'class'
 export const SCHOOL_LIFE_RECORD_INPUT_MODE_SIMILARITY = 'similarity'
+
+const SUBJECT_ABILITY_SUBJECT_OPTIONS = [
+  { id: 'korean', label: '국어' },
+  { id: 'ethics', label: '도덕' },
+  { id: 'social-studies', label: '사회' },
+  { id: 'math', label: '수학' },
+  { id: 'science', label: '과학' },
+  { id: 'english', label: '영어' },
+  { id: 'information', label: '정보' },
+  { id: 'technology-home-economics', label: '기가' },
+  { id: 'music', label: '음악' },
+  { id: 'art', label: '미술' },
+  { id: 'pe', label: '체육' },
+  { id: 'hanja', label: '한문' },
+]
+
+const MUSIC_SUBJECT_COMPETENCY_OPTIONS = [
+  '가창 능력',
+  '기악 연주',
+  '신체 표현',
+  '앙상블 조율',
+  '감정 표현력',
+  '무대 수행력',
+  '청음 및 음감',
+  '음악 분석력',
+  '맥락 이해력',
+  '비평적 사고',
+  '다양성 존중',
+  '심미적 감수성',
+  '음악 창작력',
+  '디지털 활용',
+  '문제 해결력',
+  '융합적 사고',
+  '음악적 상상',
+  '협업 팀워크',
+  '경청과 공감',
+  '인내와 끈기',
+  '문화적 소통',
+  '정서적 조절',
+]
 
 const emptySchoolLifeQualities = {
   competencies: [],
@@ -124,6 +178,16 @@ const freeSemesterCareerRecordSection = {
     '자유학기 진로선택 활동에 성실히 참여하며 자신의 흥미와 진로 방향을 탐색함.',
 }
 
+const subjectAbilityRecordSection = {
+  id: SUBJECT_ABILITY_SECTION_ID,
+  label: '과목 세부능력특기사항',
+  placeholder: '과목 세부능력특기사항 내용을 입력하세요.',
+  promptGuide:
+    '중학교 학교생활기록부의 과목세부능력특기사항 내용을 교사가 기록하는 문체로 작성해 주세요.',
+  fallbackMemo:
+    '수업 활동에 성실히 참여하며 학습 내용을 이해하고 과제 수행 과정에서 자신의 생각을 구체적으로 표현함.',
+}
+
 const behaviorRecordSection = {
   id: 'behavior',
   label: '행동특성 및 종합의견',
@@ -137,9 +201,12 @@ const behaviorRecordSection = {
 const personalRecordSections = [
   selfGovernmentRecordSection,
   clubRecordSection,
+  sportsClubRecordSection,
   careerRecordSection,
   freeSemesterSubjectRecordSection,
   freeSemesterCareerRecordSection,
+  subjectAbilityRecordSection,
+  behaviorRecordSection,
 ]
 
 const classRecordSections = [
@@ -149,6 +216,8 @@ const classRecordSections = [
   careerRecordSection,
   freeSemesterSubjectRecordSection,
   freeSemesterCareerRecordSection,
+  subjectAbilityRecordSection,
+  behaviorRecordSection,
 ]
 
 const allRecordSections = [
@@ -158,6 +227,7 @@ const allRecordSections = [
   careerRecordSection,
   freeSemesterSubjectRecordSection,
   freeSemesterCareerRecordSection,
+  subjectAbilityRecordSection,
   behaviorRecordSection,
 ]
 
@@ -635,6 +705,65 @@ function getClassActivityKey(selectedGrade, selectedClass, selectedStudent) {
 
 function getStudentRecordKey(sectionId, studentId) {
   return `${sectionId}:${studentId ?? 'empty'}`
+}
+
+function getSubjectAbilitySectionId(subjectId) {
+  return `${SUBJECT_ABILITY_SECTION_ID}:${subjectId || SUBJECT_ABILITY_SUBJECT_OPTIONS[0].id}`
+}
+
+function getSubjectAbilitySubjectOption(subjectId) {
+  return (
+    SUBJECT_ABILITY_SUBJECT_OPTIONS.find((option) => option.id === subjectId) ??
+    SUBJECT_ABILITY_SUBJECT_OPTIONS[0]
+  )
+}
+
+function getSubjectAbilityCompetencyOptions(subjectId, defaultOptions = []) {
+  if (subjectId === 'music') {
+    return MUSIC_SUBJECT_COMPETENCY_OPTIONS
+  }
+
+  return defaultOptions
+}
+
+function getKnownRecordSectionIds() {
+  return Array.from(
+    new Set([
+      ...allRecordSections.map((section) => section.id),
+      ...SUBJECT_ABILITY_SUBJECT_OPTIONS.map((subject) =>
+        getSubjectAbilitySectionId(subject.id),
+      ),
+    ]),
+  )
+}
+
+function getSubjectReferenceKey(subjectId, referenceType) {
+  return `${subjectId || SUBJECT_ABILITY_SUBJECT_OPTIONS[0].id}:${referenceType}`
+}
+
+function getSubjectReferenceTypeLabel(referenceType) {
+  if (referenceType === SUBJECT_REFERENCE_TYPE_STANDARD) {
+    return '성취기준'
+  }
+
+  if (
+    referenceType === SUBJECT_REFERENCE_TYPE_EVALUATION ||
+    referenceType === LEGACY_SUBJECT_REFERENCE_TYPE_ASSIGNMENT
+  ) {
+    return '평가항목'
+  }
+
+  return '성취수준'
+}
+
+function truncateSubjectReferenceText(value) {
+  const text = String(value ?? '').trim()
+
+  if (text.length <= SUBJECT_REFERENCE_PROMPT_LIMIT) {
+    return text
+  }
+
+  return `${text.slice(0, SUBJECT_REFERENCE_PROMPT_LIMIT)}\n...[참고자료 일부 생략]`
 }
 
 function getClassGenerationStateKey(sectionId) {
@@ -1263,16 +1392,151 @@ function isUsableClubGeneratedText(text) {
   return isLikelyKoreanRecordText(text, false) && isWithinClubRecordLength(text)
 }
 
-function buildClubFallbackRecord(departmentName, characterWords = []) {
-  const departmentLabel = String(departmentName ?? '').trim() || '동아리'
-  const qualityPhrase = characterWords.slice(0, 4).join(', ')
-  const qualityClause = qualityPhrase
-    ? `${qualityPhrase}을 바탕으로 `
-    : ''
+const CLUB_RECORD_WRITING_VARIANTS = [
+  {
+    id: 'preparation',
+    instruction:
+      '첫 문장은 준비물, 순서, 역할 확인 장면에서 시작하고, 두 번째 문장은 보완점이나 다음 연습 방향을 정리하는 흐름으로 쓰세요.',
+  },
+  {
+    id: 'practice',
+    instruction:
+      '첫 문장은 반복 연습이나 수행 장면을 중심으로 쓰고, 두 번째 문장은 친구와 맞춘 점이나 달라진 참여 태도를 쓰세요.',
+  },
+  {
+    id: 'feedback',
+    instruction:
+      '첫 문장은 친구의 의견이나 교사의 안내를 듣고 조정한 장면으로 시작하고, 두 번째 문장은 스스로 고친 점을 쓰세요.',
+  },
+  {
+    id: 'inquiry',
+    instruction:
+      '첫 문장은 활동 원리, 규칙, 방법을 질문하거나 확인한 장면으로 쓰고, 두 번째 문장은 알게 된 내용을 적용한 장면으로 쓰세요.',
+  },
+  {
+    id: 'role',
+    instruction:
+      '첫 문장은 모둠이나 팀 안에서 맡은 역할을 수행한 장면을 쓰고, 두 번째 문장은 협력 과정에서 드러난 태도를 쓰세요.',
+  },
+  {
+    id: 'reflection',
+    instruction:
+      '첫 문장은 활동 후 잘된 점과 아쉬운 점을 돌아본 장면으로 쓰고, 두 번째 문장은 다음 참여 방식의 변화를 쓰세요.',
+  },
+]
 
-  return fitClubRecordLength(
-    `${departmentLabel} 활동에서 기본 기능과 참여 방법을 익히고 친구들과 역할을 나누어 ${qualityClause}꾸준히 참여했음. 활동 중 필요한 준비와 정리 과정을 확인하며 서로의 의견을 존중하고 맡은 역할을 책임 있게 수행함.`,
-  )
+function getClubWritingVariant(index = 0) {
+  const normalizedIndex = Math.abs(Number(index) || 0)
+
+  return CLUB_RECORD_WRITING_VARIANTS[
+    normalizedIndex % CLUB_RECORD_WRITING_VARIANTS.length
+  ]
+}
+
+function rotateClubCharacterWords(characterWords = [], offset = 0) {
+  const uniqueWords = [...new Set(characterWords.filter(Boolean))]
+
+  if (!uniqueWords.length) {
+    return []
+  }
+
+  const normalizedOffset = Math.abs(Number(offset) || 0) % uniqueWords.length
+
+  return [
+    ...uniqueWords.slice(normalizedOffset),
+    ...uniqueWords.slice(0, normalizedOffset),
+  ]
+}
+
+function formatClubQualityClause(characterWords = [], offset = 0) {
+  const selectedWords = rotateClubCharacterWords(characterWords, offset).slice(0, 2)
+
+  if (!selectedWords.length) {
+    return '성실한 태도로'
+  }
+
+  return `${selectedWords.join('과 ')}을 바탕으로`
+}
+
+function buildClubFallbackRecord(
+  departmentName,
+  characterWords = [],
+  writingVariant = getClubWritingVariant(),
+  qualityOffset = 0,
+) {
+  const departmentLabel = String(departmentName ?? '').trim() || '동아리'
+  const qualityClause = formatClubQualityClause(characterWords, qualityOffset)
+  let fallbackText = ''
+
+  switch (writingVariant?.id) {
+    case 'practice':
+      fallbackText = `${departmentLabel} 활동에서 반복 연습이 필요한 부분을 찾아 ${qualityClause} 기본 동작과 참여 방법을 익혔음. 친구들과 수행 결과를 맞추어 보며 부족한 부분을 다시 시도하고 안정적으로 활동에 참여함.`
+      break
+    case 'feedback':
+      fallbackText = `${departmentLabel} 활동에서 친구의 의견과 안내를 듣고 자신의 수행 방법을 조정하며 ${qualityClause} 참여했음. 활동 중 잘 맞지 않는 부분을 차분히 고치고 함께 정한 방향에 맞추어 맡은 일을 마무리함.`
+      break
+    case 'inquiry':
+      fallbackText = `${departmentLabel} 활동에서 규칙과 방법을 질문하며 필요한 내용을 확인하고 ${qualityClause} 활동 과정을 이해했음. 알게 된 점을 실제 수행에 적용하며 친구들과 결과를 비교하고 다음 활동에 필요한 점을 정리함.`
+      break
+    case 'role':
+      fallbackText = `${departmentLabel} 활동에서 팀 안의 역할과 순서를 확인하고 ${qualityClause} 맡은 부분을 수행했음. 친구들과 필요한 도움을 주고받으며 활동 흐름을 맞추고 공동의 결과가 나아지도록 노력함.`
+      break
+    case 'reflection':
+      fallbackText = `${departmentLabel} 활동 후 잘된 점과 보완할 점을 돌아보며 ${qualityClause} 자신의 참여 태도를 점검했음. 다음 활동에서는 준비 과정과 수행 순서를 더 꼼꼼히 살피려는 모습을 보임.`
+      break
+    case 'preparation':
+    default:
+      fallbackText = `${departmentLabel} 활동에서 준비물과 활동 순서를 먼저 확인하고 ${qualityClause} 맡은 역할을 차분히 수행했음. 친구들과 결과를 비교하며 보완할 점을 찾고 다음 활동에 필요한 연습 방향을 스스로 정리함.`
+      break
+  }
+
+  return fitClubRecordLength(fallbackText)
+}
+
+function createClubFallbackCandidate(
+  departmentName,
+  characterWords = [],
+  comparableRows = [],
+  startIndex = 0,
+) {
+  let bestCandidate = {
+    similarityResult: {
+      isTooSimilar: true,
+      maxScore: Number.POSITIVE_INFINITY,
+      topMatches: [],
+    },
+    text: '',
+  }
+
+  for (let attempt = 0; attempt < CLUB_RECORD_WRITING_VARIANTS.length; attempt += 1) {
+    const writingVariant = getClubWritingVariant(startIndex + attempt)
+    const candidateText = buildClubFallbackRecord(
+      departmentName,
+      characterWords,
+      writingVariant,
+      startIndex + attempt,
+    )
+    const similarityResult = getRecordSimilarityResult(
+      candidateText,
+      comparableRows,
+    )
+
+    if (
+      !bestCandidate.text ||
+      similarityResult.maxScore < bestCandidate.similarityResult.maxScore
+    ) {
+      bestCandidate = {
+        similarityResult,
+        text: candidateText,
+      }
+    }
+
+    if (!similarityResult.isTooSimilar) {
+      break
+    }
+  }
+
+  return bestCandidate
 }
 
 function isLikelyKoreanRecordText(text, shouldBeLong = false) {
@@ -2180,6 +2444,7 @@ function SchoolLifeRecordsInput({
   onClassStudentListChange,
   onHeaderActionsChange,
   onSchoolLifeQualitySelectionsChange,
+  onSubjectAbilityHeaderStateChange,
   onToast,
   personalSectionId = SELF_GOVERNMENT_SECTION_ID,
   schoolLifeQualities = emptySchoolLifeQualities,
@@ -2218,6 +2483,22 @@ function SchoolLifeRecordsInput({
   const [classSectionId, setClassSectionId] = useState(
     SELF_GOVERNMENT_SECTION_ID,
   )
+  const [selectedSubjectAbilitySubjectId, setSelectedSubjectAbilitySubjectId] =
+    useState(SUBJECT_ABILITY_SUBJECT_OPTIONS[0].id)
+  const [isClassSectionPickerCollapsed, setIsClassSectionPickerCollapsed] =
+    useState(false)
+  const [isSubjectAbilityPickerCollapsed, setIsSubjectAbilityPickerCollapsed] =
+    useState(false)
+  const [isSubjectEvaluationEditorOpen, setIsSubjectEvaluationEditorOpen] =
+    useState(false)
+  const achievementStandardFileInputRef = useRef(null)
+  const [subjectAbilityUploadFiles, setSubjectAbilityUploadFiles] = useState({})
+  const [subjectAbilityReferenceRows, setSubjectAbilityReferenceRows] = useState(
+    {},
+  )
+  const [subjectAbilityReferenceUploading, setSubjectAbilityReferenceUploading] =
+    useState({})
+  const subjectEvaluationSaveTimersRef = useRef({})
   const classActivityKey = getClassActivityKey(
     selectedGrade,
     selectedClass,
@@ -2266,6 +2547,73 @@ function SchoolLifeRecordsInput({
   const classSelectedSection =
     classRecordSections.find((section) => section.id === classSectionId) ??
     classRecordSections[0]
+  const isClassSubjectAbilitySection =
+    classSelectedSection.id === SUBJECT_ABILITY_SECTION_ID
+  const selectedSubjectAbilitySubject = getSubjectAbilitySubjectOption(
+    selectedSubjectAbilitySubjectId,
+  )
+  const selectedSubjectAbilityCompetencyOptions =
+    getSubjectAbilityCompetencyOptions(
+      selectedSubjectAbilitySubject.id,
+      schoolLifeQualityOptions.competencies ?? [],
+    )
+  const visibleSubjectAbilitySubjects = isSubjectAbilityPickerCollapsed
+    ? [selectedSubjectAbilitySubject]
+    : SUBJECT_ABILITY_SUBJECT_OPTIONS
+  const classRecordSectionId = isClassSubjectAbilitySection
+    ? getSubjectAbilitySectionId(selectedSubjectAbilitySubject.id)
+    : classSelectedSection.id
+  const classRecordSectionLabel = isClassSubjectAbilitySection
+    ? `${classSelectedSection.label}(${selectedSubjectAbilitySubject.label})`
+    : classSelectedSection.label
+  const classRecordSectionPlaceholder = isClassSubjectAbilitySection
+    ? `${selectedSubjectAbilitySubject.label} 과목 세부능력특기사항 내용을 입력하세요.`
+    : classSelectedSection.placeholder
+  const selectedSubjectAbilityUploadKey = selectedSubjectAbilitySubject.id
+  const selectedAchievementStandardReference =
+    subjectAbilityReferenceRows[
+      getSubjectReferenceKey(
+        selectedSubjectAbilityUploadKey,
+        SUBJECT_REFERENCE_TYPE_STANDARD,
+      )
+    ] ?? null
+  const selectedAchievementStandardFileName =
+    selectedAchievementStandardReference?.file_name ??
+    subjectAbilityUploadFiles[
+      getSubjectReferenceKey(
+        selectedSubjectAbilityUploadKey,
+        SUBJECT_REFERENCE_TYPE_STANDARD,
+      )
+    ] ??
+    ''
+  const selectedSubjectEvaluationReference =
+    subjectAbilityReferenceRows[
+      getSubjectReferenceKey(
+        selectedSubjectAbilityUploadKey,
+        SUBJECT_REFERENCE_TYPE_EVALUATION,
+      )
+    ] ??
+    subjectAbilityReferenceRows[
+      getSubjectReferenceKey(
+        selectedSubjectAbilityUploadKey,
+        LEGACY_SUBJECT_REFERENCE_TYPE_ASSIGNMENT,
+      )
+    ] ??
+    null
+  const selectedSubjectEvaluationText =
+    selectedSubjectEvaluationReference?.extracted_text ?? ''
+  const isSelectedAchievementStandardUploading = Boolean(
+    subjectAbilityReferenceUploading[
+      getSubjectReferenceKey(
+        selectedSubjectAbilityUploadKey,
+        SUBJECT_REFERENCE_TYPE_STANDARD,
+      )
+    ],
+  )
+  const visibleClassRecordSections = isClassSectionPickerCollapsed
+    ? [classSelectedSection]
+    : classRecordSections
+  const activeSimilaritySectionId = classRecordSectionId
   const classScopedStudents = useMemo(
     () =>
       hasCompleteClassStudentRows
@@ -2274,7 +2622,9 @@ function SchoolLifeRecordsInput({
     [classStudentRowsState.rows, hasCompleteClassStudentRows, loadedClassStudents],
   )
   const isClubDepartmentStudentList =
-    classSelectedSection.id === CLUB_SECTION_ID && Boolean(selectedClubDepartment)
+    inputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_CLASS &&
+    classSelectedSection.id === CLUB_SECTION_ID &&
+    Boolean(selectedClubDepartment)
   const selectedClassStudents = useMemo(() => {
     if (isClubDepartmentStudentList) {
       return clubDepartmentStudentsState.departmentName === selectedClubDepartment
@@ -2312,7 +2662,7 @@ function SchoolLifeRecordsInput({
     generatingSectionIds[classGenerationStateKey],
   )
   const activeClassSimilarityReport =
-    classSimilarityReport?.sectionId === classSelectedSection.id &&
+    classSimilarityReport?.sectionId === activeSimilaritySectionId &&
     classSimilarityReport?.scopeKey === classSimilarityScopeKey &&
     classSimilarityReport?.similarityScope === similarityScope
       ? classSimilarityReport
@@ -2320,6 +2670,25 @@ function SchoolLifeRecordsInput({
   const personalSelectedSection =
     personalRecordSections.find((section) => section.id === personalSectionId) ??
     personalRecordSections[0]
+  const isPersonalSubjectAbilitySection =
+    personalSelectedSection.id === SUBJECT_ABILITY_SECTION_ID
+  const personalRecordSectionId = isPersonalSubjectAbilitySection
+    ? getSubjectAbilitySectionId(selectedSubjectAbilitySubject.id)
+    : personalSelectedSection.id
+  const personalRecordSectionLabel = isPersonalSubjectAbilitySection
+    ? `${personalSelectedSection.label}(${selectedSubjectAbilitySubject.label})`
+    : personalSelectedSection.label
+  const personalRecordSectionPlaceholder = isPersonalSubjectAbilitySection
+    ? `${selectedSubjectAbilitySubject.label} 과목 세부능력특기사항 내용을 입력하세요.`
+    : personalSelectedSection.placeholder
+  const personalEffectiveSelectedSection = isPersonalSubjectAbilitySection
+    ? {
+        ...personalSelectedSection,
+        id: personalRecordSectionId,
+        label: personalRecordSectionLabel,
+        placeholder: personalRecordSectionPlaceholder,
+      }
+    : personalSelectedSection
   const isPersonalSelfGovernmentSection =
     personalSelectedSection.id === SELF_GOVERNMENT_SECTION_ID
   const classLabel =
@@ -2568,6 +2937,60 @@ function SchoolLifeRecordsInput({
   }, [onHeaderActionsChange])
 
   useEffect(() => {
+    if (!onSubjectAbilityHeaderStateChange) {
+      return
+    }
+
+    if (
+      inputMode === SCHOOL_LIFE_RECORD_INPUT_MODE_PERSONAL &&
+      isPersonalSubjectAbilitySection
+    ) {
+      onSubjectAbilityHeaderStateChange({
+        competencyOptions: isSubjectAbilityPickerCollapsed
+          ? selectedSubjectAbilityCompetencyOptions
+          : [],
+        isSubjectPickerCollapsed: isSubjectAbilityPickerCollapsed,
+        onSubjectButtonClick: (subjectId) => {
+          const nextSubject = getSubjectAbilitySubjectOption(subjectId)
+
+          if (
+            isSubjectAbilityPickerCollapsed &&
+            selectedSubjectAbilitySubject.id === nextSubject.id
+          ) {
+            setIsSubjectAbilityPickerCollapsed(false)
+            return
+          }
+
+          setSelectedSubjectAbilitySubjectId(nextSubject.id)
+          setIsSubjectAbilityPickerCollapsed(true)
+          setClassSimilarityReport(null)
+        },
+        selectedSubjectId: selectedSubjectAbilitySubject.id,
+        subjectId: selectedSubjectAbilitySubject.id,
+        subjectLabel: selectedSubjectAbilitySubject.label,
+        subjects: SUBJECT_ABILITY_SUBJECT_OPTIONS,
+      })
+      return () => {
+        onSubjectAbilityHeaderStateChange(null)
+      }
+    }
+
+    onSubjectAbilityHeaderStateChange(null)
+
+    return () => {
+      onSubjectAbilityHeaderStateChange(null)
+    }
+  }, [
+    inputMode,
+    isPersonalSubjectAbilitySection,
+    isSubjectAbilityPickerCollapsed,
+    onSubjectAbilityHeaderStateChange,
+    selectedSubjectAbilityCompetencyOptions,
+    selectedSubjectAbilitySubject.id,
+    selectedSubjectAbilitySubject.label,
+  ])
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return
     }
@@ -2592,8 +3015,48 @@ function SchoolLifeRecordsInput({
         window.clearTimeout(timerId)
       })
       remoteSaveTimersRef.current = {}
+      Object.values(subjectEvaluationSaveTimersRef.current).forEach(
+        (timerId) => {
+          window.clearTimeout(timerId)
+        },
+      )
+      subjectEvaluationSaveTimersRef.current = {}
     }
   }, [])
+
+  useEffect(() => {
+    let isMounted = true
+
+    async function loadSubjectAbilityReferences() {
+      const { data, error } = await fetchSubjectAbilityReferenceRows({
+        schoolYear: DEFAULT_ACTIVITY_YEAR,
+      })
+
+      if (!isMounted) {
+        return
+      }
+
+      if (error) {
+        showRemoteStorageError(error)
+        return
+      }
+
+      const nextRows = {}
+
+      ;(data ?? []).forEach((row) => {
+        nextRows[getSubjectReferenceKey(row.subject_id, row.reference_type)] =
+          row
+      })
+
+      setSubjectAbilityReferenceRows(nextRows)
+    }
+
+    void loadSubjectAbilityReferences()
+
+    return () => {
+      isMounted = false
+    }
+  }, [showRemoteStorageError])
 
   useEffect(() => {
     let isMounted = true
@@ -2620,16 +3083,15 @@ function SchoolLifeRecordsInput({
       const remoteRows = data ?? []
 
       if (remoteRows.length) {
-        const rowsBySectionId = new Map(
-          remoteRows.map((row) => [row.section_id, row.content ?? '']),
-        )
-
         setRecordValues((previous) => {
           const nextRecordValues = { ...previous }
 
-          allRecordSections.forEach((section) => {
-            const recordKey = getStudentRecordKey(section.id, selectedStudentId)
-            const remoteContent = rowsBySectionId.get(section.id)
+          remoteRows.forEach((row) => {
+            const recordKey = getStudentRecordKey(
+              row.section_id,
+              selectedStudentId,
+            )
+            const remoteContent = row.content ?? ''
 
             if (remoteContent?.trim()) {
               nextRecordValues[recordKey] = remoteContent
@@ -2643,16 +3105,16 @@ function SchoolLifeRecordsInput({
         return
       }
 
-      allRecordSections.forEach((section) => {
+      getKnownRecordSectionIds().forEach((sectionId) => {
         const cachedContent =
           recordValuesRef.current[
-            getStudentRecordKey(section.id, selectedStudentId)
+            getStudentRecordKey(sectionId, selectedStudentId)
           ] ?? ''
 
         if (cachedContent.trim()) {
           void persistRemoteRecordValue(
             selectedStudentId,
-            section.id,
+            sectionId,
             cachedContent,
           )
         }
@@ -2758,9 +3220,9 @@ function SchoolLifeRecordsInput({
   function updateRecordValueForStudent(studentId, sectionId, value) {
     const recordKey = getStudentRecordKey(sectionId, studentId)
 
-    if (sectionId === SELF_GOVERNMENT_SECTION_ID) {
-      setClassSimilarityReport(null)
-    }
+    setClassSimilarityReport((previous) =>
+      previous?.sectionId === sectionId ? null : previous,
+    )
 
     setRecordValues((previous) => {
       const nextRecordValues = { ...previous }
@@ -2786,6 +3248,251 @@ function SchoolLifeRecordsInput({
       ...previous,
       [classActivityKey]: value,
     }))
+  }
+
+  function getSubjectAbilityReferencePromptContext(
+    subjectId = selectedSubjectAbilitySubject.id,
+  ) {
+    const subject = getSubjectAbilitySubjectOption(subjectId)
+    const standardReference =
+      subjectAbilityReferenceRows[
+        getSubjectReferenceKey(subject.id, SUBJECT_REFERENCE_TYPE_STANDARD)
+      ]
+    const levelReference =
+      subjectAbilityReferenceRows[
+        getSubjectReferenceKey(subject.id, SUBJECT_REFERENCE_TYPE_LEVEL)
+      ]
+    const evaluationReference =
+      subjectAbilityReferenceRows[
+        getSubjectReferenceKey(subject.id, SUBJECT_REFERENCE_TYPE_EVALUATION)
+      ] ??
+      subjectAbilityReferenceRows[
+        getSubjectReferenceKey(
+          subject.id,
+          LEGACY_SUBJECT_REFERENCE_TYPE_ASSIGNMENT,
+        )
+      ]
+    const referenceBlocks = [
+      standardReference?.extracted_text
+        ? `[${subject.label} 성취기준 및 성취수준 참고자료: ${standardReference.file_name}]\n${truncateSubjectReferenceText(
+            standardReference.extracted_text,
+          )}`
+        : '',
+      levelReference?.extracted_text
+        ? `[${subject.label} 성취수준 참고자료: ${levelReference.file_name}]\n${truncateSubjectReferenceText(
+            levelReference.extracted_text,
+          )}`
+        : '',
+      evaluationReference?.extracted_text
+        ? `[${subject.label} 평가항목 참고자료]\n${truncateSubjectReferenceText(
+            evaluationReference.extracted_text,
+          )}`
+        : '',
+    ].filter(Boolean)
+
+    return referenceBlocks.join('\n\n')
+  }
+
+  async function handleSubjectAbilityUploadFileChange(event, uploadKind) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+
+    if (!file) {
+      return
+    }
+
+    const targetSubject = selectedSubjectAbilitySubject
+    const uploadLabel =
+      uploadKind === SUBJECT_REFERENCE_TYPE_STANDARD
+        ? '성취기준 및 성취수준'
+        : getSubjectReferenceTypeLabel(uploadKind)
+    const referenceKey = getSubjectReferenceKey(targetSubject.id, uploadKind)
+
+    if (!isPdfFile(file)) {
+      onToast?.('PDF 파일만 업로드할 수 있습니다.', 'error')
+      return
+    }
+
+    setSubjectAbilityReferenceUploading((previous) => ({
+      ...previous,
+      [referenceKey]: true,
+    }))
+
+    try {
+      const extractedText = await extractPdfTextFromFile(file)
+      const { data, error } = await saveSubjectAbilityReferenceFile({
+        extractedText,
+        file,
+        referenceType: uploadKind,
+        schoolYear: DEFAULT_ACTIVITY_YEAR,
+        subjectId: targetSubject.id,
+      })
+
+      if (error) {
+        showRemoteStorageError(error)
+        return
+      }
+
+      if (data) {
+        setSubjectAbilityReferenceRows((previous) => ({
+          ...previous,
+          [referenceKey]: data,
+        }))
+      }
+
+      setSubjectAbilityUploadFiles((previous) => ({
+        ...previous,
+        [referenceKey]: file.name,
+      }))
+      onToast?.(
+        `${targetSubject.label} ${uploadLabel} PDF를 Supabase에 저장했습니다.`,
+      )
+    } catch (error) {
+      onToast?.(
+        error instanceof Error
+          ? error.message
+          : `${targetSubject.label} ${uploadLabel} PDF를 처리하지 못했습니다.`,
+        'error',
+      )
+    } finally {
+      setSubjectAbilityReferenceUploading((previous) => ({
+        ...previous,
+        [referenceKey]: false,
+      }))
+    }
+  }
+
+  function scheduleSubjectEvaluationSave(subjectId, value) {
+    const referenceKey = getSubjectReferenceKey(
+      subjectId,
+      SUBJECT_REFERENCE_TYPE_EVALUATION,
+    )
+    const previousTimerId = subjectEvaluationSaveTimersRef.current[referenceKey]
+
+    if (previousTimerId) {
+      window.clearTimeout(previousTimerId)
+    }
+
+    subjectEvaluationSaveTimersRef.current[referenceKey] = window.setTimeout(
+      async () => {
+        delete subjectEvaluationSaveTimersRef.current[referenceKey]
+
+        const { error } = await saveSubjectAbilityReferenceText({
+          content: value,
+          referenceType: SUBJECT_REFERENCE_TYPE_EVALUATION,
+          schoolYear: DEFAULT_ACTIVITY_YEAR,
+          subjectId,
+        })
+
+        if (error) {
+          showRemoteStorageError(error)
+        }
+
+        if (!String(value ?? '').trim()) {
+          await saveSubjectAbilityReferenceText({
+            content: '',
+            referenceType: LEGACY_SUBJECT_REFERENCE_TYPE_ASSIGNMENT,
+            schoolYear: DEFAULT_ACTIVITY_YEAR,
+            subjectId,
+          })
+        }
+      },
+      700,
+    )
+  }
+
+  function updateSubjectEvaluationText(value) {
+    const targetSubject = selectedSubjectAbilitySubject
+    const referenceKey = getSubjectReferenceKey(
+      targetSubject.id,
+      SUBJECT_REFERENCE_TYPE_EVALUATION,
+    )
+    const legacyReferenceKey = getSubjectReferenceKey(
+      targetSubject.id,
+      LEGACY_SUBJECT_REFERENCE_TYPE_ASSIGNMENT,
+    )
+
+    setSubjectAbilityReferenceRows((previous) => {
+      const nextRows = { ...previous }
+
+      if (value.trim()) {
+        nextRows[referenceKey] = {
+          ...(previous[referenceKey] ?? previous[legacyReferenceKey] ?? {}),
+          extracted_char_count: value.trim().length,
+          extracted_text: value,
+          file_name: '직접 입력',
+          file_size: 0,
+          reference_type: SUBJECT_REFERENCE_TYPE_EVALUATION,
+          school_year: DEFAULT_ACTIVITY_YEAR,
+          storage_path: '',
+          subject_id: targetSubject.id,
+        }
+      } else {
+        delete nextRows[referenceKey]
+        delete nextRows[legacyReferenceKey]
+      }
+
+      return nextRows
+    })
+    scheduleSubjectEvaluationSave(targetSubject.id, value)
+  }
+
+  function renderSubjectAbilityUploadActions() {
+    return (
+      <>
+        <div className="school-life-records-subject-upload-actions">
+          <button
+            className="school-life-records-subject-upload-button"
+            type="button"
+            title={selectedAchievementStandardFileName || undefined}
+            disabled={isSelectedAchievementStandardUploading}
+            onClick={() => achievementStandardFileInputRef.current?.click()}
+          >
+            {isSelectedAchievementStandardUploading
+              ? '성취기준 & 수준 저장 중...'
+              : selectedAchievementStandardFileName
+                ? '성취기준 & 수준 저장됨'
+                : '성취기준 & 수준 업로드'}
+          </button>
+          <button
+            className={`school-life-records-subject-upload-button ${
+              isSubjectEvaluationEditorOpen ? 'is-active' : ''
+            }`}
+            type="button"
+            aria-expanded={isSubjectEvaluationEditorOpen}
+            onClick={() =>
+              setIsSubjectEvaluationEditorOpen((previous) => !previous)
+            }
+          >
+            {selectedSubjectEvaluationText.trim() ? '평가항목 입력됨' : '평가항목'}
+          </button>
+          <input
+            ref={achievementStandardFileInputRef}
+            className="visually-hidden"
+            type="file"
+            accept=".pdf,application/pdf"
+            onChange={(event) =>
+              handleSubjectAbilityUploadFileChange(
+                event,
+                SUBJECT_REFERENCE_TYPE_STANDARD,
+              )
+            }
+          />
+        </div>
+        {isSubjectEvaluationEditorOpen ? (
+          <label className="school-life-records-subject-evaluation-field">
+            <span>평가항목</span>
+            <textarea
+              value={selectedSubjectEvaluationText}
+              onChange={(event) =>
+                updateSubjectEvaluationText(event.target.value)
+              }
+              placeholder={`${selectedSubjectAbilitySubject.label} 평가항목을 입력하세요.`}
+            />
+          </label>
+        ) : null}
+      </>
+    )
   }
 
   function setSectionGenerationState(sectionId, isGenerating) {
@@ -2814,6 +3521,8 @@ function SchoolLifeRecordsInput({
   function createClubDepartmentPromptInstruction(
     departmentName,
     characterWords = [],
+    writingVariant = null,
+    diversityInstruction = '',
   ) {
     const topicKeywords = getClubDepartmentTopicKeywords(departmentName)
 
@@ -2826,8 +3535,13 @@ function SchoolLifeRecordsInput({
       topicKeywords.length
         ? `문장 안에 다음 핵심 주제 중 하나 이상이 자연스럽게 드러나야 합니다: ${topicKeywords.join(', ')}.`
         : '',
+      writingVariant
+        ? `이번 학생의 문장 전개 방식: ${writingVariant.instruction}`
+        : '',
       `글자 수는 공백 포함 ${CLUB_RECORD_MIN_LENGTH}자 이상 ${CLUB_RECORD_MAX_LENGTH}자 이하로 작성하세요.`,
       '봉사, 나눔, 배려 같은 일반적 표현만으로 채우지 말고 해당 동아리에서 실제로 할 법한 연습, 탐구, 협력, 발표, 경기, 제작, 감상, 역할 수행 내용을 넣으세요.',
+      '다른 학생과 같은 "활동에서 ... 익히고 ... 수행했음. 활동 중 ..." 문장 골격을 반복하지 말고 시작 장면, 서술 순서, 마무리 관점을 다르게 쓰세요.',
+      diversityInstruction,
     ]
       .filter(Boolean)
       .join('\n')
@@ -2845,15 +3559,36 @@ function SchoolLifeRecordsInput({
     const studentContext = `${targetStudent.grade}학년 ${targetStudent.class_num}반 ${targetStudent.student_num}번`
     const isSelfGovernmentSection = section.id === SELF_GOVERNMENT_SECTION_ID
     const isClubSection = section.id === CLUB_SECTION_ID
+    const isSubjectAbilitySection =
+      section.id === SUBJECT_ABILITY_SECTION_ID ||
+      String(section.id).startsWith(`${SUBJECT_ABILITY_SECTION_ID}:`)
+    const subjectAbilitySubjectId = String(section.id).startsWith(
+      `${SUBJECT_ABILITY_SECTION_ID}:`,
+    )
+      ? String(section.id).split(':')[1]
+      : selectedSubjectAbilitySubject.id
+    const subjectAbilitySubject =
+      getSubjectAbilitySubjectOption(subjectAbilitySubjectId)
+    const subjectReferenceContext = isSubjectAbilitySection
+      ? getSubjectAbilityReferencePromptContext(subjectAbilitySubject.id)
+      : ''
     const originalSelectedQualities = [
       ...(targetSchoolLifeQualities.competencies ?? []),
       ...(targetSchoolLifeQualities.characters ?? []),
     ]
+    const subjectCompetencyOptions = getSubjectAbilityCompetencyOptions(
+      subjectAbilitySubject.id,
+      schoolLifeQualityOptions.competencies ?? [],
+    )
     const selectedCompetencies = isSelfGovernmentSection
       ? filterQualitiesBySelectedActivities(
           targetSchoolLifeQualities.competencies ?? [],
           selectedActivityRows,
         )
+      : isSubjectAbilitySection
+        ? (targetSchoolLifeQualities.competencies ?? []).filter((quality) =>
+            subjectCompetencyOptions.includes(quality),
+          )
       : targetSchoolLifeQualities.competencies ?? []
     const selectedCharacters = isSelfGovernmentSection
       ? filterQualitiesBySelectedActivities(
@@ -2890,6 +3625,12 @@ function SchoolLifeRecordsInput({
           : '관찰 가능한 행동 중심으로 자연스럽게 2문장, 180자 이내로 작성하세요.',
       isClubSection
         ? '동아리 활동명이나 부서명이 주어지면 그 제목에 걸맞은 구체적인 활동 내용, 역할 수행, 협력 태도, 연습이나 탐구 과정을 중심으로 작성하세요.'
+        : '',
+      isSubjectAbilitySection
+        ? `${subjectAbilitySubject.label} 과목의 수업 관찰 내용, 배움의 과정, 수행 태도, 개념 이해를 중심으로 과목 세부능력특기사항을 작성하세요.`
+        : '',
+      isSubjectAbilitySection
+        ? '업로드한 성취기준/성취수준 참고자료와 직접 입력한 평가항목이 있으면 핵심 개념과 도달 수준, 평가 내용을 반영하되, 자료 문장을 그대로 길게 베끼지 말고 학생의 관찰 가능한 행동과 연결하세요.'
         : '',
       isSelfGovernmentSection
         ? '아래에서 랜덤 선택된 자율자치 활동 3~4개만 활용하고, 출력은 반드시 활동내용(실시일) 형식을 문장 안에 넣어 이어 쓰세요. 예: 학교폭력 예방교육(2026.03.11.)을 통해 타인의 입장을 이해하고 갈등을 평화롭게 해결하는 방법을 배움.'
@@ -2931,6 +3672,9 @@ function SchoolLifeRecordsInput({
         : '',
       isSelfGovernmentSection && qualityExpressionContext
         ? `[역량/품성별 표현 방향]\n${qualityExpressionContext}`
+        : '',
+      isSubjectAbilitySection && subjectReferenceContext
+        ? `[업로드한 과목 참고자료]\n${subjectReferenceContext}`
         : '',
       diversityInstruction,
       memo && isSelfGovernmentSection
@@ -3015,10 +3759,10 @@ function SchoolLifeRecordsInput({
 
     setSectionGenerationState(section.id, true)
 
-    try {
-      let comparableRows = []
+    let comparableRows = []
 
-      if (isSelfGovernmentSection) {
+    try {
+      if (isSelfGovernmentSection || isClubSection) {
         const { data, error } = await fetchComparableSchoolLifeRecordRows({
           classNum: selectedStudent.class_num,
           grade: selectedStudent.grade,
@@ -3058,12 +3802,25 @@ function SchoolLifeRecordsInput({
         attempt <= MAX_DIVERSITY_REPAIR_ATTEMPTS;
         attempt += 1
       ) {
+        const promptDiversityInstruction = isClubSection
+          ? [
+              `이번 학생의 문장 전개 방식: ${
+                getClubWritingVariant(
+                  Number(selectedStudent.student_num ?? 0) + attempt,
+                ).instruction
+              }`,
+              '동아리 활동 문장은 다른 학생과 같은 시작 표현, 같은 2문장 골격, 같은 마무리 표현을 반복하지 마세요.',
+              diversityInstruction,
+            ]
+              .filter(Boolean)
+              .join('\n')
+          : diversityInstruction
         const rawGeneratedText = await requestGeneratedRecordText(
           createRecordPrompt(
             section,
             currentText,
             selectedActivityRows,
-            diversityInstruction,
+            promptDiversityInstruction,
             selectedStudent,
             isClubSection ? clubQualitySelection : schoolLifeQualities,
           ),
@@ -3091,7 +3848,7 @@ function SchoolLifeRecordsInput({
           continue
         }
 
-        const similarityResult = isSelfGovernmentSection
+        const similarityResult = isSelfGovernmentSection || isClubSection
           ? getRecordSimilarityResult(generatedText, comparableRows)
           : { isTooSimilar: false, maxScore: 0, topMatches: [] }
 
@@ -3151,11 +3908,33 @@ function SchoolLifeRecordsInput({
         bestSimilarityResult = fallbackSimilarityResult
       }
 
-      if (!bestCandidate && isClubSection) {
-        bestCandidate = buildClubFallbackRecord(
+      if (isClubSection && bestCandidate && bestSimilarityResult.isTooSimilar) {
+        const fallbackCandidate = createClubFallbackCandidate(
           section.label,
           clubQualitySelection.characters,
+          comparableRows,
+          Number(selectedStudent.student_num ?? 0),
         )
+
+        if (
+          fallbackCandidate.text &&
+          fallbackCandidate.similarityResult.maxScore <
+            bestSimilarityResult.maxScore
+        ) {
+          bestCandidate = fallbackCandidate.text
+          bestSimilarityResult = fallbackCandidate.similarityResult
+        }
+      }
+
+      if (!bestCandidate && isClubSection) {
+        const fallbackCandidate = createClubFallbackCandidate(
+          section.label,
+          clubQualitySelection.characters,
+          comparableRows,
+          Number(selectedStudent.student_num ?? 0),
+        )
+        bestCandidate = fallbackCandidate.text
+        bestSimilarityResult = fallbackCandidate.similarityResult
       }
 
       if (!bestCandidate || !isValidGeneratedText(bestCandidate)) {
@@ -3171,12 +3950,14 @@ function SchoolLifeRecordsInput({
         }
 
         if (isClubSection) {
-          const fallbackText = buildClubFallbackRecord(
+          const fallbackCandidate = createClubFallbackCandidate(
             section.label,
             clubQualitySelection.characters,
+            comparableRows,
+            Number(selectedStudent.student_num ?? 0),
           )
 
-          updateRecordValue(section.id, fallbackText)
+          updateRecordValue(section.id, fallbackCandidate.text)
           onToast?.(`${selectedStudent.name} 학생의 동아리 활동 문장을 보정했습니다.`)
           return
         }
@@ -3215,12 +3996,14 @@ function SchoolLifeRecordsInput({
       }
 
       if (isClubSection) {
-        const fallbackText = buildClubFallbackRecord(
+        const fallbackCandidate = createClubFallbackCandidate(
           section.label,
           clubQualitySelection.characters,
+          comparableRows,
+          Number(selectedStudent.student_num ?? 0),
         )
 
-        updateRecordValue(section.id, fallbackText)
+        updateRecordValue(section.id, fallbackCandidate.text)
         onToast?.(`${selectedStudent.name} 학생의 동아리 활동 문장을 보정했습니다.`)
         return
       }
@@ -3271,24 +4054,56 @@ function SchoolLifeRecordsInput({
 
     setSectionGenerationState(classGenerationStateKey, true)
 
+    const existingComparableRows = getCurrentClassComparableRows(
+      classSelectedSection.id,
+      selectedClassStudents,
+    )
+    const generatedRows = []
     let completedCount = 0
     let skippedCount = 0
     let fallbackCount = 0
+    let tooSimilarCount = 0
 
     try {
-      for (const student of selectedClassStudents) {
+      for (const [studentIndex, student] of selectedClassStudents.entries()) {
+        const generatedStudentIds = new Set(
+          generatedRows.map((row) => row.student_id),
+        )
+        const comparableRows = [
+          ...existingComparableRows.filter(
+            (row) =>
+              row.student_id !== student.id &&
+              !generatedStudentIds.has(row.student_id),
+          ),
+          ...generatedRows,
+        ]
         const recordKey = getStudentRecordKey(classSelectedSection.id, student.id)
         const currentText = recordValuesRef.current[recordKey] ?? ''
         const clubQualitySelection = getClubCharacterQualitySelection()
         let generatedText = ''
-        let bestCandidate = ''
+        let bestCandidate = {
+          similarityResult: {
+            isTooSimilar: true,
+            maxScore: Number.POSITIVE_INFINITY,
+            topMatches: [],
+          },
+          text: '',
+        }
 
         try {
           for (
             let attempt = 0;
-            attempt <= MAX_DIVERSITY_REPAIR_ATTEMPTS;
+            attempt <= CLUB_DIVERSITY_REPAIR_ATTEMPTS;
             attempt += 1
           ) {
+            const writingVariant = getClubWritingVariant(studentIndex + attempt)
+            const diversityInstruction = bestCandidate.text
+              ? createDiversityInstruction(
+                  bestCandidate.text,
+                  bestCandidate.similarityResult,
+                  attempt + 1,
+                )
+              : ''
             const nextGeneratedText = fitClubRecordLength(
               await requestGeneratedRecordText(
                 createRecordPrompt(
@@ -3298,40 +4113,75 @@ function SchoolLifeRecordsInput({
                   createClubDepartmentPromptInstruction(
                     selectedClubDepartment,
                     clubQualitySelection.characters,
+                    writingVariant,
+                    diversityInstruction,
                   ),
                   student,
                   clubQualitySelection,
                 ),
               ),
             )
+            const isValidClubText = isValidClubGeneratedText(
+              nextGeneratedText,
+              selectedClubDepartment,
+            )
 
-            if (isValidClubGeneratedText(nextGeneratedText, selectedClubDepartment)) {
+            if (!isValidClubText && !isUsableClubGeneratedText(nextGeneratedText)) {
+              continue
+            }
+
+            const similarityResult = getRecordSimilarityResult(
+              nextGeneratedText,
+              comparableRows,
+            )
+
+            if (
+              isValidClubText &&
+              (!bestCandidate.text ||
+                similarityResult.maxScore <
+                  bestCandidate.similarityResult.maxScore)
+            ) {
+              bestCandidate = {
+                similarityResult,
+                text: nextGeneratedText,
+              }
+            }
+
+            if (isValidClubText && !similarityResult.isTooSimilar) {
               generatedText = nextGeneratedText
               break
             }
+          }
 
-            if (!bestCandidate && isUsableClubGeneratedText(nextGeneratedText)) {
-              bestCandidate = nextGeneratedText
-            }
+          const fallbackCandidate = createClubFallbackCandidate(
+            selectedClubDepartment,
+            clubQualitySelection.characters,
+            comparableRows,
+            studentIndex,
+          )
+
+          if (
+            !generatedText &&
+            (!bestCandidate.text ||
+              fallbackCandidate.similarityResult.maxScore <
+                bestCandidate.similarityResult.maxScore ||
+              bestCandidate.similarityResult.isTooSimilar)
+          ) {
+            generatedText = fallbackCandidate.text
+            fallbackCount += 1
           }
 
           if (!generatedText) {
-            generatedText =
-              bestCandidate ||
-              buildClubFallbackRecord(
-                selectedClubDepartment,
-                clubQualitySelection.characters,
-              )
-
-            if (!bestCandidate) {
-              fallbackCount += 1
-            }
+            generatedText = bestCandidate.text
           }
         } catch {
-          generatedText = buildClubFallbackRecord(
+          const fallbackCandidate = createClubFallbackCandidate(
             selectedClubDepartment,
             clubQualitySelection.characters,
+            comparableRows,
+            studentIndex,
           )
+          generatedText = fallbackCandidate.text
           fallbackCount += 1
         }
 
@@ -3340,11 +4190,23 @@ function SchoolLifeRecordsInput({
           continue
         }
 
+        if (getRecordSimilarityResult(generatedText, comparableRows).isTooSimilar) {
+          tooSimilarCount += 1
+        }
+
         updateRecordValueForStudent(
           student.id,
           classSelectedSection.id,
           generatedText,
         )
+        recordValuesRef.current = {
+          ...recordValuesRef.current,
+          [recordKey]: generatedText,
+        }
+        generatedRows.push({
+          content: generatedText,
+          student_id: student.id,
+        })
         completedCount += 1
       }
 
@@ -3359,6 +4221,10 @@ function SchoolLifeRecordsInput({
       onToast?.(
         `${selectedClubDepartment} ${completedCount}명 동아리 활동 문장을 입력했습니다.${
           fallbackCount ? ` ${fallbackCount}명은 보정 문장으로 입력했습니다.` : ''
+        }${
+          tooSimilarCount
+            ? ` ${tooSimilarCount}명은 가장 낮은 유사도 후보를 적용했습니다.`
+            : ' 유사도 50% 이하 기준으로 보정했습니다.'
         }${skippedCount ? ` ${skippedCount}명은 입력하지 못했습니다.` : ''}`,
       )
     } finally {
@@ -3517,11 +4383,8 @@ function SchoolLifeRecordsInput({
     }
   }
 
-  async function handleCheckClassSelfGovernmentSimilarity() {
-    if (classSelectedSection.id !== SELF_GOVERNMENT_SECTION_ID) {
-      return
-    }
-
+  async function handleCheckClassSimilarity() {
+    const sectionId = activeSimilaritySectionId
     const classStudentsForReport = await resolveSelectedClassStudents()
     let comparisonRows = []
 
@@ -3534,7 +4397,7 @@ function SchoolLifeRecordsInput({
         grade: activeClassGrade,
         schoolYear: DEFAULT_ACTIVITY_YEAR,
         scope: similarityScope,
-        sectionId: SELF_GOVERNMENT_SECTION_ID,
+        sectionId,
       })
 
       if (error) {
@@ -3546,7 +4409,7 @@ function SchoolLifeRecordsInput({
     }
 
     const report = createClassSimilarityReport(
-      SELF_GOVERNMENT_SECTION_ID,
+      sectionId,
       classStudentsForReport,
       comparisonRows,
       similarityScope,
@@ -3924,32 +4787,39 @@ function SchoolLifeRecordsInput({
       <div className="school-life-records-fields" aria-label="학교생활기록부 입력">
         <section
           className="school-life-records-field-card"
-          key={personalSelectedSection.id}
+          key={personalEffectiveSelectedSection.id}
         >
           <div className="school-life-records-field-card__header">
-            <h2>{personalSelectedSection.label}</h2>
+            <h2>{personalEffectiveSelectedSection.label}</h2>
           </div>
+
+          {isPersonalSubjectAbilitySection ? (
+            <>
+              {renderSubjectAbilityUploadActions()}
+            </>
+          ) : null}
 
           <label className="school-life-records-field">
             <span className="visually-hidden">
-              {selectedStudent.name} {personalSelectedSection.label}
+              {selectedStudent.name} {personalEffectiveSelectedSection.label}
             </span>
             <textarea
               maxLength={
-                personalSelectedSection.id === SELF_GOVERNMENT_SECTION_ID
+                personalEffectiveSelectedSection.id === SELF_GOVERNMENT_SECTION_ID
                   ? SELF_GOVERNMENT_MAX_LENGTH
                   : undefined
               }
               value={
-                recordValues[getRecordKey(personalSelectedSection.id)] ?? ''
+                recordValues[getRecordKey(personalEffectiveSelectedSection.id)] ??
+                ''
               }
               onChange={(event) =>
                 updateRecordValue(
-                  personalSelectedSection.id,
+                  personalEffectiveSelectedSection.id,
                   event.target.value,
                 )
               }
-              placeholder={personalSelectedSection.placeholder}
+              placeholder={personalEffectiveSelectedSection.placeholder}
             />
           </label>
 
@@ -3957,10 +4827,12 @@ function SchoolLifeRecordsInput({
             <button
               className="school-life-records-ai-button"
               type="button"
-              onClick={() => handleGenerateRecord(personalSelectedSection)}
-              disabled={Boolean(generatingSectionIds[personalSelectedSection.id])}
+              onClick={() => handleGenerateRecord(personalEffectiveSelectedSection)}
+              disabled={Boolean(
+                generatingSectionIds[personalEffectiveSelectedSection.id],
+              )}
             >
-              {generatingSectionIds[personalSelectedSection.id]
+              {generatingSectionIds[personalEffectiveSelectedSection.id]
                 ? '생성 중...'
                 : 'Gemini 생성'}
             </button>
@@ -4006,11 +4878,15 @@ function SchoolLifeRecordsInput({
           </div>
 
           <div
-            className="school-life-records-section-tabs school-life-records-section-tabs--class"
+            className={`school-life-records-section-tabs school-life-records-section-tabs--class ${
+              isClassSectionPickerCollapsed
+                ? 'school-life-records-section-tabs--collapsed'
+                : ''
+            }`}
             aria-label="전체 입력 항목 선택"
             role="tablist"
           >
-            {classRecordSections.map((section) => (
+            {visibleClassRecordSections.map((section) => (
               <button
                 aria-selected={classSectionId === section.id}
                 className={`school-life-records-section-tab ${
@@ -4020,7 +4896,16 @@ function SchoolLifeRecordsInput({
                 role="tab"
                 type="button"
                 onClick={() => {
+                  if (
+                    isClassSectionPickerCollapsed &&
+                    section.id === classSectionId
+                  ) {
+                    setIsClassSectionPickerCollapsed(false)
+                    return
+                  }
+
                   setClassSectionId(section.id)
+                  setIsClassSectionPickerCollapsed(true)
                   if (section.id !== CLUB_SECTION_ID) {
                     setSelectedClubDepartment('')
                   }
@@ -4030,6 +4915,49 @@ function SchoolLifeRecordsInput({
               </button>
             ))}
           </div>
+
+          {isClassSubjectAbilitySection ? (
+            <div
+              className={`school-life-records-subject-tabs ${
+                isSubjectAbilityPickerCollapsed
+                  ? 'school-life-records-subject-tabs--collapsed'
+                  : ''
+              }`}
+              aria-label="과목 세부능력특기사항 과목 선택"
+              role="group"
+            >
+              {visibleSubjectAbilitySubjects.map((subject) => (
+                <button
+                  className={`school-life-records-subject-tab ${
+                    selectedSubjectAbilitySubject.id === subject.id
+                      ? 'is-active'
+                      : ''
+                  }`}
+                  key={subject.id}
+                  type="button"
+                  aria-pressed={selectedSubjectAbilitySubject.id === subject.id}
+                  onClick={() => {
+                    if (
+                      isSubjectAbilityPickerCollapsed &&
+                      selectedSubjectAbilitySubject.id === subject.id
+                    ) {
+                      setIsSubjectAbilityPickerCollapsed(false)
+                      return
+                    }
+
+                    setSelectedSubjectAbilitySubjectId(subject.id)
+                    setIsSubjectAbilityPickerCollapsed(true)
+                    setClassSimilarityReport(null)
+                  }}
+                >
+                  {subject.label}
+                </button>
+              ))}
+              {isSubjectAbilityPickerCollapsed
+                ? renderSubjectAbilityUploadActions()
+                : null}
+            </div>
+          ) : null}
 
           {classSelectedSection.id === CLUB_SECTION_ID ? (
             <div className="school-life-records-club-filter">
@@ -4073,11 +5001,11 @@ function SchoolLifeRecordsInput({
           {selectedClassStudents.length ? (
             <div
               className="school-life-records-class-list"
-              aria-label={`${classListLabel} 학생별 ${classSelectedSection.label} 입력`}
+              aria-label={`${classListLabel} 학생별 ${classRecordSectionLabel} 입력`}
             >
               {selectedClassStudents.map((student) => {
                 const recordKey = getStudentRecordKey(
-                  classSelectedSection.id,
+                  classRecordSectionId,
                   student.id,
                 )
 
@@ -4088,16 +5016,16 @@ function SchoolLifeRecordsInput({
                   >
                     <div className="school-life-records-class-row__header">
                       <strong>{getStudentDisplayLabel(student)}</strong>
-                      <span>{classSelectedSection.label}</span>
+                      <span>{classRecordSectionLabel}</span>
                     </div>
 
                     <label className="school-life-records-field">
                       <span className="visually-hidden">
-                        {student.name} {classSelectedSection.label}
+                        {student.name} {classRecordSectionLabel}
                       </span>
                       <textarea
                         maxLength={
-                          classSelectedSection.id === SELF_GOVERNMENT_SECTION_ID
+                          classRecordSectionId === SELF_GOVERNMENT_SECTION_ID
                             ? SELF_GOVERNMENT_MAX_LENGTH
                             : undefined
                         }
@@ -4105,11 +5033,11 @@ function SchoolLifeRecordsInput({
                         onChange={(event) =>
                           updateRecordValueForStudent(
                             student.id,
-                            classSelectedSection.id,
+                            classRecordSectionId,
                             event.target.value,
                           )
                         }
-                        placeholder={classSelectedSection.placeholder}
+                        placeholder={classRecordSectionPlaceholder}
                       />
                     </label>
                   </section>
@@ -4132,41 +5060,97 @@ function SchoolLifeRecordsInput({
               <h2>{classLabel}</h2>
             </div>
 
-            <div className="school-life-records-class-card__actions">
+            <div className="school-life-records-class-card__actions school-life-records-class-card__actions--similarity">
               <div
-                className="school-life-records-similarity-scope"
-                aria-label="유사도 비교 범위"
-                role="group"
+                className="school-life-records-section-tabs school-life-records-section-tabs--class school-life-records-section-tabs--similarity"
+                aria-label="유사도 검사 항목 선택"
+                role="tablist"
               >
-                {similarityScopeOptions.map((option) => (
+                {classRecordSections.map((section) => (
                   <button
-                    className={`school-life-records-similarity-scope__button ${
-                      similarityScope === option.id ? 'is-active' : ''
+                    aria-selected={classSectionId === section.id}
+                    className={`school-life-records-section-tab ${
+                      classSectionId === section.id ? 'is-active' : ''
                     }`}
-                    key={option.id}
+                    key={section.id}
+                    role="tab"
                     type="button"
                     onClick={() => {
-                      setSimilarityScope(option.id)
+                      setClassSectionId(section.id)
                       setClassSimilarityReport(null)
+                      if (section.id !== CLUB_SECTION_ID) {
+                        setSelectedClubDepartment('')
+                      }
                     }}
                   >
-                    {option.label}
+                    {section.label}
                   </button>
                 ))}
               </div>
+              {isClassSubjectAbilitySection ? (
+                <div
+                  className="school-life-records-subject-tabs"
+                  aria-label="과목 세부능력특기사항 과목 선택"
+                  role="group"
+                >
+                  {SUBJECT_ABILITY_SUBJECT_OPTIONS.map((subject) => (
+                    <button
+                      className={`school-life-records-subject-tab ${
+                        selectedSubjectAbilitySubject.id === subject.id
+                          ? 'is-active'
+                          : ''
+                      }`}
+                      key={subject.id}
+                      type="button"
+                      aria-pressed={
+                        selectedSubjectAbilitySubject.id === subject.id
+                      }
+                      onClick={() => {
+                        setSelectedSubjectAbilitySubjectId(subject.id)
+                        setClassSimilarityReport(null)
+                      }}
+                    >
+                      {subject.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="school-life-records-similarity-controls">
+                <div
+                  className="school-life-records-similarity-scope"
+                  aria-label="유사도 비교 범위"
+                  role="group"
+                >
+                  {similarityScopeOptions.map((option) => (
+                    <button
+                      className={`school-life-records-similarity-scope__button ${
+                        similarityScope === option.id ? 'is-active' : ''
+                      }`}
+                      key={option.id}
+                      type="button"
+                      onClick={() => {
+                        setSimilarityScope(option.id)
+                        setClassSimilarityReport(null)
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               <button
                 className="school-life-records-check-button"
                 type="button"
-                onClick={handleCheckClassSelfGovernmentSimilarity}
+                onClick={handleCheckClassSimilarity}
                 disabled={
                   isGeneratingClassSection ||
                   isClassStudentRowsLoading ||
-                  (!selectedClassStudents.length &&
+                  (!classScopedStudents.length &&
                     (!activeClassGrade || !activeClassNum))
                 }
               >
                 유사도 검사
               </button>
+              </div>
             </div>
           </div>
 
@@ -4175,7 +5159,7 @@ function SchoolLifeRecordsInput({
               className={`school-life-records-similarity-panel ${
                 activeClassSimilarityReport.highCount ? 'has-high' : ''
               }`}
-              aria-label="자율자치 활동 유사도 검사 결과"
+              aria-label={`${classRecordSectionLabel} 유사도 검사 결과`}
             >
               <div className="school-life-records-similarity-panel__header">
                 <div>
@@ -4234,7 +5218,7 @@ function SchoolLifeRecordsInput({
                 <p className="school-life-records-similarity-empty">
                   {activeClassSimilarityReport.similarityScope ===
                   SIMILARITY_SCOPE_CLASS
-                    ? '입력된 자율자치 활동 문장이 2명 이상일 때 유사도를 비교할 수 있습니다.'
+                    ? `입력된 ${classRecordSectionLabel} 문장이 2명 이상일 때 유사도를 비교할 수 있습니다.`
                     : '선택한 범위에 비교할 저장 문장이 아직 없습니다.'}
                 </p>
               ) : (
@@ -4295,7 +5279,53 @@ function SchoolLifeRecordsInput({
                 </div>
               )}
             </section>
-          ) : null}
+          ) : (
+            <section
+              className="school-life-records-similarity-panel school-life-records-similarity-panel--empty"
+              aria-label={`${classRecordSectionLabel} 유사도 검사 안내`}
+            >
+              <div className="school-life-records-similarity-panel__header">
+                <div>
+                  <p className="section-label">검사 전 확인</p>
+                  <h3>{classRecordSectionLabel} 입력 내용을 비교합니다.</h3>
+                  <p className="school-life-records-similarity-panel__scope">
+                    비교 범위를 선택한 뒤 유사도 검사를 누르면 학생별 입력 문장의
+                    유사한 부분을 확인할 수 있습니다.
+                  </p>
+                </div>
+                <span className="school-life-records-similarity-badge school-life-records-similarity-badge--safe">
+                  준비됨
+                </span>
+              </div>
+
+              <div className="school-life-records-similarity-summary">
+                <span>
+                  입력 학생
+                  <strong>{classScopedStudents.length}명</strong>
+                </span>
+                <span>
+                  비교 범위
+                  <strong>{getSimilarityScopeLabel(similarityScope)}</strong>
+                </span>
+                <span>
+                  검사 항목
+                  <strong>{classRecordSectionLabel}</strong>
+                </span>
+                <span>
+                  기준
+                  <strong>50%</strong>
+                </span>
+                <span>
+                  상태
+                  <strong>{isClassStudentRowsLoading ? '불러오는 중' : '대기'}</strong>
+                </span>
+              </div>
+
+              <p className="school-life-records-similarity-empty">
+                검사 결과가 아직 없습니다. 위쪽의 유사도 검사 버튼을 눌러 주세요.
+              </p>
+            </section>
+          )}
         </section>
       ) : null}
     </section>
