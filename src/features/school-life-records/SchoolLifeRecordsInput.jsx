@@ -1220,6 +1220,61 @@ function isValidClubGeneratedText(text, departmentName = '') {
   )
 }
 
+function fitClubRecordLength(text) {
+  let fittedText = normalizeGeneratedRecordPunctuation(text)
+
+  if (getRecordTextLength(fittedText) <= CLUB_RECORD_MAX_LENGTH) {
+    return fittedText
+  }
+
+  let clippedText = Array.from(fittedText)
+    .slice(0, CLUB_RECORD_MAX_LENGTH)
+    .join('')
+    .trim()
+  const sentenceBoundaryIndex = Math.max(
+    clippedText.lastIndexOf('.'),
+    clippedText.lastIndexOf('!'),
+    clippedText.lastIndexOf('?'),
+  )
+
+  if (sentenceBoundaryIndex >= CLUB_RECORD_MIN_LENGTH) {
+    clippedText = clippedText.slice(0, sentenceBoundaryIndex + 1).trim()
+  } else {
+    const softBoundaryIndex = Math.max(
+      clippedText.lastIndexOf(','),
+      clippedText.lastIndexOf(' '),
+    )
+
+    if (softBoundaryIndex >= CLUB_RECORD_MIN_LENGTH) {
+      clippedText = clippedText.slice(0, softBoundaryIndex).trim()
+    }
+  }
+
+  clippedText = clippedText.replace(/[,\s]+$/u, '').trim()
+
+  if (clippedText && !/[.!?]$/u.test(clippedText)) {
+    clippedText = `${clippedText}.`
+  }
+
+  return clippedText
+}
+
+function isUsableClubGeneratedText(text) {
+  return isLikelyKoreanRecordText(text, false) && isWithinClubRecordLength(text)
+}
+
+function buildClubFallbackRecord(departmentName, characterWords = []) {
+  const departmentLabel = String(departmentName ?? '').trim() || '동아리'
+  const qualityPhrase = characterWords.slice(0, 4).join(', ')
+  const qualityClause = qualityPhrase
+    ? `${qualityPhrase}을 바탕으로 `
+    : ''
+
+  return fitClubRecordLength(
+    `${departmentLabel} 활동에서 기본 기능과 참여 방법을 익히고 친구들과 역할을 나누어 ${qualityClause}꾸준히 참여했음. 활동 중 필요한 준비와 정리 과정을 확인하며 서로의 의견을 존중하고 맡은 역할을 책임 있게 수행함.`,
+  )
+}
+
 function isLikelyKoreanRecordText(text, shouldBeLong = false) {
   const koreanCount = text.match(/[가-힣]/g)?.length ?? 0
   const latinCount = text.match(/[A-Za-z]/g)?.length ?? 0
@@ -3003,7 +3058,7 @@ function SchoolLifeRecordsInput({
         attempt <= MAX_DIVERSITY_REPAIR_ATTEMPTS;
         attempt += 1
       ) {
-        const generatedText = await requestGeneratedRecordText(
+        const rawGeneratedText = await requestGeneratedRecordText(
           createRecordPrompt(
             section,
             currentText,
@@ -3013,6 +3068,9 @@ function SchoolLifeRecordsInput({
             isClubSection ? clubQualitySelection : schoolLifeQualities,
           ),
         )
+        const generatedText = isClubSection
+          ? fitClubRecordLength(rawGeneratedText)
+          : rawGeneratedText
         const activityPhraseResult = isSelfGovernmentSection
           ? getRepeatedActivityPhraseResult(
               generatedText,
@@ -3093,6 +3151,13 @@ function SchoolLifeRecordsInput({
         bestSimilarityResult = fallbackSimilarityResult
       }
 
+      if (!bestCandidate && isClubSection) {
+        bestCandidate = buildClubFallbackRecord(
+          section.label,
+          clubQualitySelection.characters,
+        )
+      }
+
       if (!bestCandidate || !isValidGeneratedText(bestCandidate)) {
         if (isSelfGovernmentSection) {
           const fallbackText = buildSelfGovernmentFallbackRecord(
@@ -3102,6 +3167,17 @@ function SchoolLifeRecordsInput({
 
           updateRecordValue(section.id, fallbackText)
           onToast?.(`${selectedStudent.name} 학생의 자율자치 활동 문장을 보정했습니다.`)
+          return
+        }
+
+        if (isClubSection) {
+          const fallbackText = buildClubFallbackRecord(
+            section.label,
+            clubQualitySelection.characters,
+          )
+
+          updateRecordValue(section.id, fallbackText)
+          onToast?.(`${selectedStudent.name} 학생의 동아리 활동 문장을 보정했습니다.`)
           return
         }
 
@@ -3135,6 +3211,17 @@ function SchoolLifeRecordsInput({
         onToast?.(
           `${selectedStudent.name} 학생의 자율자치 활동 문장을 활동 주제에 맞춰 보정했습니다.`,
         )
+        return
+      }
+
+      if (isClubSection) {
+        const fallbackText = buildClubFallbackRecord(
+          section.label,
+          clubQualitySelection.characters,
+        )
+
+        updateRecordValue(section.id, fallbackText)
+        onToast?.(`${selectedStudent.name} 학생의 동아리 활동 문장을 보정했습니다.`)
         return
       }
 
@@ -3186,6 +3273,7 @@ function SchoolLifeRecordsInput({
 
     let completedCount = 0
     let skippedCount = 0
+    let fallbackCount = 0
 
     try {
       for (const student of selectedClassStudents) {
@@ -3193,6 +3281,7 @@ function SchoolLifeRecordsInput({
         const currentText = recordValuesRef.current[recordKey] ?? ''
         const clubQualitySelection = getClubCharacterQualitySelection()
         let generatedText = ''
+        let bestCandidate = ''
 
         try {
           for (
@@ -3200,59 +3289,77 @@ function SchoolLifeRecordsInput({
             attempt <= MAX_DIVERSITY_REPAIR_ATTEMPTS;
             attempt += 1
           ) {
-            const nextGeneratedText = await requestGeneratedRecordText(
-              createRecordPrompt(
-                classSelectedSection,
-                currentText,
-                [],
-                createClubDepartmentPromptInstruction(
-                  selectedClubDepartment,
-                  clubQualitySelection.characters,
+            const nextGeneratedText = fitClubRecordLength(
+              await requestGeneratedRecordText(
+                createRecordPrompt(
+                  classSelectedSection,
+                  currentText,
+                  [],
+                  createClubDepartmentPromptInstruction(
+                    selectedClubDepartment,
+                    clubQualitySelection.characters,
+                  ),
+                  student,
+                  clubQualitySelection,
                 ),
-                student,
-                clubQualitySelection,
               ),
             )
 
-            if (
-              isValidClubGeneratedText(
-                nextGeneratedText,
-                selectedClubDepartment,
-              )
-            ) {
+            if (isValidClubGeneratedText(nextGeneratedText, selectedClubDepartment)) {
               generatedText = nextGeneratedText
               break
+            }
+
+            if (!bestCandidate && isUsableClubGeneratedText(nextGeneratedText)) {
+              bestCandidate = nextGeneratedText
             }
           }
 
           if (!generatedText) {
-            skippedCount += 1
-            continue
-          }
+            generatedText =
+              bestCandidate ||
+              buildClubFallbackRecord(
+                selectedClubDepartment,
+                clubQualitySelection.characters,
+              )
 
-          updateRecordValueForStudent(
-            student.id,
-            classSelectedSection.id,
-            generatedText,
-          )
-          completedCount += 1
+            if (!bestCandidate) {
+              fallbackCount += 1
+            }
+          }
         } catch {
-          skippedCount += 1
+          generatedText = buildClubFallbackRecord(
+            selectedClubDepartment,
+            clubQualitySelection.characters,
+          )
+          fallbackCount += 1
         }
+
+        if (!generatedText || !isUsableClubGeneratedText(generatedText)) {
+          skippedCount += 1
+          continue
+        }
+
+        updateRecordValueForStudent(
+          student.id,
+          classSelectedSection.id,
+          generatedText,
+        )
+        completedCount += 1
       }
 
       if (!completedCount) {
         onToast?.(
-          '동아리 활동 문장을 생성하지 못했습니다. Gemini 연결 상태를 확인해 주세요.',
+          '동아리 활동 문장을 입력하지 못했습니다. Gemini 연결 상태를 확인해 주세요.',
           'error',
         )
         return
       }
 
       onToast?.(
-        `${selectedClubDepartment} ${completedCount}명 동아리 활동 문장을 생성했습니다.${
-          skippedCount ? ` ${skippedCount}명은 생성하지 못했습니다.` : ''
-        }`,
+        `${selectedClubDepartment} ${completedCount}명 동아리 활동 문장을 입력했습니다.${
+          fallbackCount ? ` ${fallbackCount}명은 보정 문장으로 입력했습니다.` : ''
+        }${skippedCount ? ` ${skippedCount}명은 입력하지 못했습니다.` : ''}`,
       )
     } finally {
       setSectionGenerationState(classGenerationStateKey, false)
