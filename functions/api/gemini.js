@@ -1,7 +1,7 @@
 const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash'
 const MAX_PROMPT_LENGTH = 4000
 const MAX_REPAIR_ATTEMPTS = 4
-const LONG_RECORD_MIN_LENGTH = 400
+const LONG_RECORD_MIN_LENGTH = 350
 const LONG_RECORD_MAX_LENGTH = 450
 const STRICT_SYSTEM_INSTRUCTION =
   '너는 중학교 교사가 학교생활기록부 문장을 작성하도록 돕는 보조자다. 모든 응답은 반드시 한국어 산문으로만 작성한다. 제목, 설명, 번호, 목록, 불릿, 마크다운, 영어 번역, 작성 안내 문구를 쓰지 말고 완성된 생활기록부 문장만 출력한다. 사용자가 활동명(실시일) 같은 출력 형식을 지정하면 반드시 그 형식을 지킨다. 활동자료가 주어지면 각 활동명에 담긴 실제 교육 주제와 직접 관련된 내용만 작성하고, 봉사정신, 나눔, 공동체 의식 같은 일반 가치어로 활동 내용을 대체하지 않는다. 학생역량과 품성은 단어 라벨로 붙이지 말고 관찰 가능한 행동과 사고 과정으로 풀어 쓴다.'
@@ -46,7 +46,7 @@ function cleanGeneratedRecordText(text) {
 }
 
 function isLongRecordPrompt(prompt) {
-  return /400~450|500자 미만|자율자치/u.test(prompt)
+  return /350~450|400~450|500자 미만|자율자치/u.test(prompt)
 }
 
 function getRecordTextLength(text) {
@@ -63,10 +63,13 @@ function isWithinLongRecordLength(text) {
 
 function isLikelyKoreanRecordText(text, prompt = '') {
   const normalizedText = cleanGeneratedRecordText(text)
+  const compactText = normalizedText.replace(/\s+/g, '')
   const koreanCount = normalizedText.match(/[가-힣]/g)?.length ?? 0
   const latinCount = normalizedText.match(/[A-Za-z]/g)?.length ?? 0
   const shouldEnforceLongLength = isLongRecordPrompt(prompt)
   const hasCompleteEnding = /[.!?。]$/u.test(normalizedText)
+  const hasBrokenEnding =
+    /(?:그치함|핵심함|바탕함|연결함|태도함|모습함|내용함)\.?$/u.test(compactText)
   const hasInstructionLeak =
     /\b(showing|conclude|conclusion|write|student|record|activity|empathy|kindness|conflict|resolution|politeness|March|semester)\b/i.test(
       normalizedText,
@@ -77,6 +80,7 @@ function isLikelyKoreanRecordText(text, prompt = '') {
     koreanCount >= 20 &&
     latinCount <= Math.max(12, Math.floor(koreanCount * 0.08)) &&
     hasCompleteEnding &&
+    !hasBrokenEnding &&
     !hasInstructionLeak
   )
 }
@@ -97,8 +101,9 @@ function createGeminiPayload(prompt) {
               '활동명이 주어진 요청에서는 활동명과 직접 관련된 교육 내용, 대처 방법, 실천 태도를 중심으로 쓰고 관련 없는 품성어로 내용을 채우지 마세요.',
               '"협업을 바탕으로", "적응력을 바탕으로"처럼 역량명만 바꿔 붙이는 표현을 쓰지 말고, 해당 역량이 드러나는 구체적 행동으로 풀어 쓰세요.',
               '학생마다 같은 마무리 문장을 반복하지 말고 활동과 역량에 맞는 다른 결론으로 마무리하세요.',
+              '마지막 문장은 반드시 자연스러운 서술어로 끝내고 단어가 중간에서 끊긴 문장을 출력하지 마세요.',
               isLongRecordPrompt(prompt)
-                ? '최종 출력은 공백 포함 반드시 400자 이상 450자 이하로 작성하세요. 399자 이하와 451자 이상은 실패입니다.'
+                ? '최종 출력은 공백 포함 반드시 350자 이상 450자 이하로 작성하세요. 349자 이하와 451자 이상은 실패입니다.'
                 : '',
               prompt,
             ]
@@ -125,7 +130,7 @@ function createRepairPrompt(originalPrompt, flawedText) {
     '활동명과 맞지 않는 일반 가치어로 채운 부분은 버리고, 각 활동명의 실제 교육 주제와 직접 관련된 내용으로 다시 작성하세요.',
     '역량명이나 품성명을 "~을 바탕으로"처럼 붙인 부분은 관찰 행동으로 바꾸고, 반복된 마무리 문장은 학생 특성에 맞게 새로 쓰세요.',
     isLongRecordPrompt(originalPrompt)
-      ? `최종 출력은 공백 포함 반드시 400자 이상 450자 이하로 맞추세요. 현재 초안은 ${flawedTextLength}자입니다.`
+      ? `최종 출력은 공백 포함 반드시 350자 이상 450자 이하로 맞추세요. 현재 초안은 ${flawedTextLength}자입니다.`
       : '',
     '',
     '[원래 요청]',
@@ -241,7 +246,7 @@ export async function onRequestPost(context) {
     return jsonResponse(
       {
         error:
-          `한국어 생활기록부 문장으로 생성되지 않았거나 400~450자 범위를 벗어났습니다.${lengthError} 다시 생성해 주세요.`,
+          `한국어 생활기록부 문장으로 생성되지 않았거나 350~450자 범위를 벗어났습니다.${lengthError} 다시 생성해 주세요.`,
       },
       { status: 502 },
     )

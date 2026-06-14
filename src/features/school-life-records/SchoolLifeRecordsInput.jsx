@@ -11,9 +11,9 @@ const SELF_GOVERNMENT_SECTION_ID = 'self-government'
 const ACTIVITY_STORAGE_KEY = 'dsy-school-life-self-government-activities-v1'
 const RECORD_STORAGE_KEY = 'dsy-school-life-record-values-v1'
 const DEFAULT_ACTIVITY_YEAR = '2026'
-const SELF_GOVERNMENT_MIN_LENGTH = 400
+const SELF_GOVERNMENT_MIN_LENGTH = 350
 const SELF_GOVERNMENT_MAX_LENGTH = 450
-const MAX_RECORD_SIMILARITY = 0.3
+const MAX_RECORD_SIMILARITY = 0.5
 const MAX_DIVERSITY_REPAIR_ATTEMPTS = 2
 
 const emptySchoolLifeQualities = {
@@ -195,6 +195,99 @@ const DEFAULT_ACTIVITY_TOPIC_GUIDE = {
   fallbackFocus:
     '활동명에 담긴 핵심 주제와 배운 내용을 연결하여 필요한 태도와 실천 방법을 정리했으며',
 }
+
+const ACTIVITY_EXPRESSION_VARIANTS = [
+  {
+    keywords: ['학교폭력', '폭력예방', '사이버폭력', '따돌림'],
+    focusVariants: [
+      '장난과 폭력의 경계를 구분하고 피해 학생의 입장에서 상황을 바라보는 내용',
+      '언어폭력, 따돌림, 사이버폭력 사례를 통해 방관의 문제와 신고 절차를 생각하는 내용',
+      '갈등이 커지기 전에 도움을 요청하고 안전한 관계를 회복하는 방법',
+      '피해를 발견했을 때 혼자 해결하려 하지 않고 주변 어른과 연결하는 태도',
+    ],
+    fallbackFocuses: [
+      '장난과 폭력의 경계를 구분하고 피해 학생의 입장에서 상황을 바라보며 도움 요청 절차를 확인했으며',
+      '언어폭력과 사이버폭력 사례를 살피며 방관의 문제를 이해하고 안전한 신고 방법을 익혔으며',
+      '갈등 상황에서 감정적으로 대응하기보다 주변 어른에게 알리고 도움을 구하는 절차를 정리했으며',
+      '친구 관계에서 생길 수 있는 폭력의 신호를 살피고 피해를 줄이기 위한 말과 행동을 생각했으며',
+    ],
+  },
+  {
+    keywords: ['아동학대', '학대예방'],
+    focusVariants: [
+      '아동의 권리, 안전한 보호 환경, 위험 신호를 알아차리는 방법',
+      '학대 상황을 혼자 감추지 않고 신뢰할 수 있는 어른에게 알리는 절차',
+      '몸과 마음의 안전을 지키기 위해 도움을 요청하는 구체적 방법',
+      '권리 침해 상황을 발견했을 때 필요한 보호와 신고의 의미',
+    ],
+    fallbackFocuses: [
+      '아동의 권리와 안전한 보호 환경의 의미를 알고 위험 신호를 알아차리는 방법을 익혔으며',
+      '학대가 의심되는 상황을 혼자 감추지 않고 신뢰할 수 있는 어른에게 알리는 절차를 확인했으며',
+      '몸과 마음의 안전을 지키기 위해 필요한 도움을 요청하는 방법을 구체적으로 정리했으며',
+      '권리 침해 상황을 발견했을 때 보호와 신고가 왜 필요한지 생각했으며',
+    ],
+  },
+  {
+    keywords: ['안전', '재난', '화재', '지진', '교통', '응급', '심폐소생'],
+    focusVariants: [
+      '위험 징후를 미리 살피고 상황별 안전수칙을 적용하는 방법',
+      '대피 순서, 주변 확인, 침착한 대응처럼 실제 장면에서 필요한 절차',
+      '사고 예방을 위해 자신의 행동과 주변 환경을 점검하는 태도',
+      '응급 상황에서 당황하지 않고 도움을 요청하는 과정',
+    ],
+    fallbackFocuses: [
+      '위험 징후를 미리 살피고 상황에 맞는 안전수칙을 적용하는 방법을 확인했으며',
+      '대피 순서와 주변 확인 절차를 익히며 실제 장면에서 침착하게 행동하는 방법을 정리했으며',
+      '사고 예방을 위해 자신의 행동과 주변 환경을 점검하는 태도를 익혔으며',
+      '응급 상황에서 당황하지 않고 도움을 요청하며 필요한 절차를 따르는 방법을 익혔으며',
+    ],
+  },
+  {
+    keywords: ['장애', '인식개선'],
+    focusVariants: [
+      '장애를 개인의 문제가 아니라 접근성과 지원 환경의 관점에서 이해하는 내용',
+      '편견이 생기는 장면을 살피고 서로 다른 생활 방식을 존중하는 태도',
+      '정당한 편의와 배리어프리의 의미를 학교생활 장면과 연결하는 내용',
+      '도움이 필요한 상황에서 상대의 의사를 먼저 확인하는 태도',
+    ],
+    fallbackFocuses: [
+      '장애를 개인의 문제가 아니라 접근성과 지원 환경의 관점에서 이해했으며',
+      '편견이 생기는 장면을 살피고 서로 다른 생활 방식을 존중하는 태도를 익혔으며',
+      '정당한 편의와 배리어프리의 의미를 학교생활 장면과 연결해 생각했으며',
+      '도움이 필요한 상황에서도 상대의 의사를 먼저 확인하는 태도의 중요성을 이해했으며',
+    ],
+  },
+  {
+    keywords: ['자치', '학급회의', '학생회', '선거'],
+    focusVariants: [
+      '학급 안건을 제안하고 의견을 모아 결정하는 민주적 절차',
+      '역할을 나누고 약속을 정하며 학급 운영에 참여하는 과정',
+      '다수 의견과 소수 의견을 함께 살피며 합의점을 찾는 태도',
+      '학급의 문제를 함께 발견하고 해결 방법을 정하는 경험',
+    ],
+    fallbackFocuses: [
+      '학급 안건을 제안하고 의견을 모아 결정하는 민주적 절차를 이해했으며',
+      '역할을 나누고 약속을 정하며 학급 운영에 참여하는 과정을 익혔으며',
+      '다수 의견과 소수 의견을 함께 살피며 합의점을 찾는 태도를 배웠으며',
+      '학급의 문제를 함께 발견하고 해결 방법을 정하는 경험을 했으며',
+    ],
+  },
+  {
+    keywords: SERVICE_ACTIVITY_KEYWORDS,
+    focusVariants: [
+      '공간의 변화를 살피고 필요한 일을 찾아 공동의 환경을 정돈하는 과정',
+      '맡은 구역과 역할을 확인하며 생활 공간을 함께 관리하는 태도',
+      '친구들과 순서를 나누어 실천하고 활동 후 달라진 점을 돌아보는 내용',
+      '봉사를 단순한 청소가 아니라 함께 쓰는 공간을 책임지는 경험으로 이해하는 내용',
+    ],
+    fallbackFocuses: [
+      '공간의 변화를 살피고 필요한 일을 찾아 공동의 환경을 정돈하는 경험을 했으며',
+      '맡은 구역과 역할을 확인하며 생활 공간을 함께 관리하는 태도를 익혔으며',
+      '친구들과 순서를 나누어 실천하고 활동 후 달라진 점을 돌아보았으며',
+      '봉사를 단순한 청소가 아니라 함께 쓰는 공간을 책임지는 경험으로 이해했으며',
+    ],
+  },
+]
 
 const QUALITY_ACTIVITY_KEYWORD_REQUIREMENTS = [
   {
@@ -509,13 +602,41 @@ function getActivityTopicGuide(activityContent) {
   )
 }
 
+function getActivityExpressionVariant(activityContent) {
+  return ACTIVITY_EXPRESSION_VARIANTS.find((variant) =>
+    includesAnyKeyword(activityContent, variant.keywords),
+  )
+}
+
+function getActivityFocusCandidates(activityContent) {
+  const guide = getActivityTopicGuide(activityContent)
+  const variant = getActivityExpressionVariant(activityContent)
+
+  return variant?.focusVariants?.length ? variant.focusVariants : [guide.focus]
+}
+
+function getActivityFallbackFocus(activityContent, usedFocuses = new Set()) {
+  const guide = getActivityTopicGuide(activityContent)
+  const variant = getActivityExpressionVariant(activityContent)
+  const fallbackFocuses =
+    variant?.fallbackFocuses?.length ? variant.fallbackFocuses : [guide.fallbackFocus]
+  const availableFocuses = fallbackFocuses.filter((focus) => !usedFocuses.has(focus))
+  const selectedFocus = getRandomItem(availableFocuses.length ? availableFocuses : fallbackFocuses)
+
+  if (selectedFocus) {
+    usedFocuses.add(selectedFocus)
+  }
+
+  return selectedFocus ?? guide.fallbackFocus
+}
+
 function formatActivityFocusRowsForPrompt(activityRows) {
   return activityRows
     .map((row) => {
       const activityName = formatActivityForRecordSentence(row)
-      const guide = getActivityTopicGuide(row.content)
+      const focusCandidates = getActivityFocusCandidates(row.content)
 
-      return `${activityName}: ${guide.focus}을 중심으로 작성`
+      return `${activityName}: ${focusCandidates.join(' / ')} 중 하나를 중심으로 작성하되 문장을 그대로 복사하지 말 것`
     })
     .join('\n')
 }
@@ -852,6 +973,12 @@ function hasRepeatedGenericClosing(text) {
   )
 }
 
+function hasBrokenRecordEnding(text) {
+  return /(?:그치함|핵심함|바탕함|연결함|태도함|모습함|내용함)\.?$/u.test(
+    normalizeKeywordSource(text),
+  )
+}
+
 function normalizeRecordForSimilarity(text) {
   return String(text ?? '')
     .replace(/\d{4}\.\d{2}\.\d{2}\./g, '')
@@ -976,7 +1103,7 @@ function createDiversityInstruction(generatedText, similarityResult, attemptNumb
     `[차별화 재작성 지시 ${attemptNumber}]`,
     `방금 생성문이 같은 학급 기존 문장과 ${Math.round(
       similarityResult.maxScore * 100,
-    )}% 유사했습니다. 최종 문장은 기존 문장과 체감 유사도 30% 이하가 되도록 다시 작성하세요.`,
+    )}% 유사했습니다. 최종 문장은 기존 문장과 체감 유사도 50% 이하가 되도록 다시 작성하세요.`,
     '활동 순서와 2문장 구조는 유지하되, 첫 문장의 연결 방식, 두 번째 문장의 시작, 마무리 관점, 역량/품성 표현을 모두 바꾸세요.',
     '아래 기존 문장과 같은 구절, 같은 마무리, 같은 "생활 속/학교생활 속/이어 가려 함" 전개를 반복하지 마세요.',
     matchedExamples,
@@ -1008,16 +1135,21 @@ function getQualityForActivity(qualityWords, activityContent, usedQualities) {
   return quality
 }
 
-function createActivityFallbackClause(activity, qualityWords, usedQualities) {
-  const guide = getActivityTopicGuide(activity.content)
+function createActivityFallbackClause(
+  activity,
+  qualityWords,
+  usedQualities,
+  usedFocuses,
+) {
   const quality = getQualityForActivity(
     qualityWords,
     activity.content,
     usedQualities,
   )
   const qualityPhrase = getQualityExpressionGuide(quality).activity
+  const focusPhrase = getActivityFallbackFocus(activity.content, usedFocuses)
 
-  return `${formatActivityForRecordSentence(activity)}에서 ${qualityPhrase} ${guide.fallbackFocus}`
+  return `${formatActivityForRecordSentence(activity)}에서 ${qualityPhrase} ${focusPhrase}`
 }
 
 function closeFallbackClauseAsSentence(clause) {
@@ -1034,10 +1166,10 @@ function getLengthAdditions(qualityWords = []) {
     DEFAULT_QUALITY_EXPRESSION_GUIDE.growth
 
   return [
-    `이 과정에서 ${growthPhrase} 모습을 학교생활 속에서 이어 가려 함`,
-    '상황에 맞는 실천 방법을 스스로 점검하며 배운 내용을 실제 장면에 적용하려 함',
-    '친구들과 필요한 약속을 확인하고 활동에서 배운 절차를 생활 속 선택으로 연결함',
-    '자신의 행동을 돌아보며 활동별 핵심 내용을 꾸준한 실천으로 이어 가려 함',
+    `이후 활동 내용을 다시 확인하며 ${growthPhrase} 태도를 차분히 다져 감`,
+    '상황에 맞는 실천 방법을 스스로 점검하고 실제 장면에서 필요한 행동을 떠올림',
+    '친구들과 필요한 약속을 확인하며 활동에서 배운 절차를 구체적인 선택으로 연결함',
+    '자신의 행동을 돌아보고 활동별 핵심 내용을 다음 참여 과정에 활용하려 노력함',
   ]
 }
 
@@ -1057,13 +1189,46 @@ function createClosingSentence(remainingClauses, qualityWords) {
     ? `${remainingClauses.join(', ')},`
     : '앞선 활동을 되짚으며'
   const closingTemplates = [
-    `${secondSentenceStart} 배운 절차와 약속을 쉬는 시간과 모둠 활동의 실제 장면에 적용하며 ${growthPhrase} 태도를 이어감.`,
-    `${secondSentenceStart} 활동별 핵심 내용을 자신의 학교생활 습관과 연결하고 ${growthPhrase} 모습을 꾸준히 보임.`,
-    `${secondSentenceStart} 상황별 대처 방법을 친구들과 함께 확인하며 ${growthPhrase} 자세를 학교생활 속에서 확장함.`,
-    `${secondSentenceStart} 알게 된 내용을 단순한 지식에 그치지 않고 생활 속 판단 기준으로 삼으며 ${growthPhrase} 태도를 발전시킴.`,
+    `${secondSentenceStart} 배운 절차와 약속을 쉬는 시간과 모둠 활동에서 떠올리며 ${growthPhrase} 태도를 구체화함.`,
+    `${secondSentenceStart} 활동별 핵심 내용을 자신의 참여 방식과 연결해 보고 ${growthPhrase} 모습을 차분히 다져 감.`,
+    `${secondSentenceStart} 상황별 대처 방법을 친구들과 확인하면서 ${growthPhrase} 자세를 실제 학급 장면에 적용함.`,
+    `${secondSentenceStart} 알게 된 내용을 단순히 기억하는 데 그치지 않고 다음 활동에서 실천할 기준으로 삼음.`,
+    `${secondSentenceStart} 각 활동에서 확인한 약속과 절차를 바탕으로 자신이 할 수 있는 역할을 다시 정리함.`,
   ]
 
   return getRandomItem(closingTemplates)
+}
+
+function trimSelfGovernmentRecordLength(text) {
+  if (getRecordTextLength(text) <= SELF_GOVERNMENT_MAX_LENGTH) {
+    return text
+  }
+
+  const clippedText = Array.from(text)
+    .slice(0, SELF_GOVERNMENT_MAX_LENGTH + 1)
+    .join('')
+  const lastPeriodIndex = clippedText.lastIndexOf('.')
+
+  if (lastPeriodIndex >= SELF_GOVERNMENT_MIN_LENGTH) {
+    return clippedText.slice(0, lastPeriodIndex + 1).trim()
+  }
+
+  const closingText = ' 내용을 정리함.'
+  const baseText = Array.from(text)
+    .slice(0, SELF_GOVERNMENT_MAX_LENGTH - getRecordTextLength(closingText))
+    .join('')
+  const naturalBoundary = Math.max(
+    baseText.lastIndexOf(','),
+    baseText.lastIndexOf('며'),
+    baseText.lastIndexOf('고'),
+    baseText.lastIndexOf('하여'),
+  )
+  const trimmedBase =
+    naturalBoundary >= SELF_GOVERNMENT_MIN_LENGTH - 20
+      ? baseText.slice(0, naturalBoundary)
+      : baseText
+
+  return `${trimmedBase.replace(/[,\s]+$/u, '')}${closingText}`.trim()
 }
 
 function fitSelfGovernmentRecordLength(text, qualityWords = []) {
@@ -1098,23 +1263,7 @@ function fitSelfGovernmentRecordLength(text, qualityWords = []) {
     }
   }
 
-  if (getRecordTextLength(fittedText) > SELF_GOVERNMENT_MAX_LENGTH) {
-    const clippedText = Array.from(fittedText)
-      .slice(0, SELF_GOVERNMENT_MAX_LENGTH + 1)
-      .join('')
-    const lastPeriodIndex = clippedText.lastIndexOf('.')
-
-    if (lastPeriodIndex >= SELF_GOVERNMENT_MIN_LENGTH) {
-      return clippedText.slice(0, lastPeriodIndex + 1).trim()
-    }
-
-    return `${Array.from(fittedText)
-      .slice(0, SELF_GOVERNMENT_MAX_LENGTH - 2)
-      .join('')
-      .replace(/[,\s]+$/u, '')}함.`
-  }
-
-  return fittedText
+  return trimSelfGovernmentRecordLength(fittedText)
 }
 
 function buildSelfGovernmentFallbackRecord(selectedActivityRows, schoolLifeQualities) {
@@ -1133,10 +1282,16 @@ function buildSelfGovernmentFallbackRecord(selectedActivityRows, schoolLifeQuali
   )
   const qualityWords = getRandomQualityWords(allowedSchoolLifeQualities)
   const usedQualities = new Set()
+  const usedFocuses = new Set()
   const clauses = activities
     .slice(0, 4)
     .map((activity) =>
-      createActivityFallbackClause(activity, qualityWords, usedQualities),
+      createActivityFallbackClause(
+        activity,
+        qualityWords,
+        usedQualities,
+        usedFocuses,
+      ),
     )
   const firstSentenceClauses = clauses.slice(0, Math.min(2, clauses.length))
   const remainingClauses = clauses.slice(2)
@@ -1437,7 +1592,7 @@ function SchoolLifeRecordsInput({
       '영어 번역, 제목, 설명, 번호, 목록, 불릿, 마크다운 기호(*, **, #, -), 따옴표를 절대 쓰지 마세요.',
       '학생 이름은 넣지 말고, 과장된 표현은 피해 주세요.',
       isSelfGovernmentSection
-        ? '한 문단으로 작성하고 최종 출력은 공백 포함 반드시 400자 이상 450자 이하로 맞추세요. 399자 이하는 실패이고 451자 이상도 실패입니다.'
+        ? '한 문단으로 작성하고 최종 출력은 공백 포함 반드시 350자 이상 450자 이하로 맞추세요. 349자 이하는 실패이고 451자 이상도 실패입니다.'
         : '관찰 가능한 행동 중심으로 자연스럽게 2문장, 180자 이내로 작성하세요.',
       isSelfGovernmentSection
         ? '아래에서 랜덤 선택된 자율자치 활동 3~4개만 활용하고, 출력은 반드시 활동내용(실시일) 형식을 문장 안에 넣어 이어 쓰세요. 예: 학교폭력 예방교육(2026.03.11.)을 통해 타인의 입장을 이해하고 갈등을 평화롭게 해결하는 방법을 배움.'
@@ -1456,6 +1611,9 @@ function SchoolLifeRecordsInput({
         : '',
       isSelfGovernmentSection
         ? '같은 마무리 문장이나 같은 표현을 학생마다 반복하지 말고, 선택된 역량과 품성에 따라 문장 전개와 결론이 분명히 달라지게 쓰세요.'
+        : '',
+      isSelfGovernmentSection
+        ? '마지막 문장은 반드시 자연스러운 서술어로 끝내고, "그치함", "핵심함"처럼 단어가 잘린 표현이 나오지 않게 하세요.'
         : '',
       ...qualityRestrictionInstructions,
       isSelfGovernmentSection
@@ -1570,7 +1728,8 @@ function SchoolLifeRecordsInput({
               text,
               selectedQualityWords,
             ) &&
-            !hasRepeatedGenericClosing(text)))
+            !hasRepeatedGenericClosing(text) &&
+            !hasBrokenRecordEnding(text)))
 
       let bestCandidate = null
       let bestSimilarityResult = {
