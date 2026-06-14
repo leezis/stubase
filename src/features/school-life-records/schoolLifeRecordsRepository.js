@@ -36,6 +36,46 @@ export async function fetchSchoolLifeRecordRows(studentId, schoolYear) {
     .eq('school_year', schoolYear)
 }
 
+export async function fetchComparableSchoolLifeRecordRows({
+  classNum,
+  grade,
+  schoolYear,
+  sectionId,
+  studentId,
+}) {
+  if (!supabase || !grade || !classNum || !sectionId) {
+    return { data: [], error: null }
+  }
+
+  const {
+    data: students,
+    error: studentsError,
+  } = await supabase
+    .from('students')
+    .select('id')
+    .eq('grade', Number(grade))
+    .eq('class_num', Number(classNum))
+
+  if (studentsError) {
+    return { data: [], error: studentsError }
+  }
+
+  const studentIds = (students ?? [])
+    .map((student) => student.id)
+    .filter((id) => id && id !== studentId)
+
+  if (!studentIds.length) {
+    return { data: [], error: null }
+  }
+
+  return supabase
+    .from(SCHOOL_LIFE_RECORD_TABLE)
+    .select('student_id, content')
+    .eq('school_year', schoolYear)
+    .eq('section_id', sectionId)
+    .in('student_id', studentIds)
+}
+
 export async function saveSchoolLifeRecordValue({
   content,
   schoolYear,

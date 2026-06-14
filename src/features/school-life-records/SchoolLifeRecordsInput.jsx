@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  fetchComparableSchoolLifeRecordRows,
   fetchSchoolLifeRecordRows,
   getSchoolLifeRecordErrorMessage,
   saveSchoolLifeRecordValue,
@@ -12,6 +13,8 @@ const RECORD_STORAGE_KEY = 'dsy-school-life-record-values-v1'
 const DEFAULT_ACTIVITY_YEAR = '2026'
 const SELF_GOVERNMENT_MIN_LENGTH = 400
 const SELF_GOVERNMENT_MAX_LENGTH = 450
+const MAX_RECORD_SIMILARITY = 0.3
+const MAX_DIVERSITY_REPAIR_ATTEMPTS = 2
 
 const emptySchoolLifeQualities = {
   competencies: [],
@@ -849,6 +852,140 @@ function hasRepeatedGenericClosing(text) {
   )
 }
 
+function normalizeRecordForSimilarity(text) {
+  return String(text ?? '')
+    .replace(/\d{4}\.\d{2}\.\d{2}\./g, '')
+    .replace(/\d{1,2}[./-]\d{1,2}/g, '')
+    .replace(/[()[\]{}.,!?。'"“”‘’\s]/g, '')
+    .trim()
+}
+
+function createNgramSet(text, size) {
+  const normalizedText = normalizeRecordForSimilarity(text)
+  const ngrams = new Set()
+
+  if (normalizedText.length < size) {
+    if (normalizedText) {
+      ngrams.add(normalizedText)
+    }
+
+    return ngrams
+  }
+
+  for (let index = 0; index <= normalizedText.length - size; index += 1) {
+    ngrams.add(normalizedText.slice(index, index + size))
+  }
+
+  return ngrams
+}
+
+function calculateSetOverlap(leftSet, rightSet) {
+  if (!leftSet.size || !rightSet.size) {
+    return 0
+  }
+
+  let intersectionCount = 0
+
+  leftSet.forEach((value) => {
+    if (rightSet.has(value)) {
+      intersectionCount += 1
+    }
+  })
+
+  const unionCount = leftSet.size + rightSet.size - intersectionCount
+  const jaccardScore = unionCount ? intersectionCount / unionCount : 0
+  const containmentScore =
+    intersectionCount / Math.min(leftSet.size, rightSet.size)
+
+  return Math.max(jaccardScore, containmentScore * 0.58)
+}
+
+function calculateRecordSimilarity(leftText, rightText) {
+  const leftThreeGrams = createNgramSet(leftText, 3)
+  const rightThreeGrams = createNgramSet(rightText, 3)
+  const leftFourGrams = createNgramSet(leftText, 4)
+  const rightFourGrams = createNgramSet(rightText, 4)
+  const threeGramScore = calculateSetOverlap(leftThreeGrams, rightThreeGrams)
+  const fourGramScore = calculateSetOverlap(leftFourGrams, rightFourGrams)
+
+  return Math.max(threeGramScore * 0.55 + fourGramScore * 0.45)
+}
+
+function getRecordSimilarityResult(text, comparableRows) {
+  const comparisons = (comparableRows ?? [])
+    .map((row) => ({
+      content: row.content ?? '',
+      score: calculateRecordSimilarity(text, row.content),
+      studentId: row.student_id,
+    }))
+    .filter((comparison) => comparison.content.trim())
+    .sort((left, right) => right.score - left.score)
+
+  return {
+    isTooSimilar: (comparisons[0]?.score ?? 0) > MAX_RECORD_SIMILARITY,
+    maxScore: comparisons[0]?.score ?? 0,
+    topMatches: comparisons.slice(0, 3),
+  }
+}
+
+function getRepeatedSimilarityPhrases(text, topMatches) {
+  const compactText = normalizeRecordForSimilarity(text)
+  const phrases = new Set()
+
+  topMatches.forEach((match) => {
+    const compactMatch = normalizeRecordForSimilarity(match.content)
+
+    for (let size = 18; size >= 10 && phrases.size < 8; size -= 2) {
+      for (
+        let index = 0;
+        index <= compactText.length - size && phrases.size < 8;
+        index += 4
+      ) {
+        const phrase = compactText.slice(index, index + size)
+
+        if (compactMatch.includes(phrase)) {
+          phrases.add(phrase)
+        }
+      }
+    }
+  })
+
+  return Array.from(phrases)
+}
+
+function createDiversityInstruction(generatedText, similarityResult, attemptNumber) {
+  if (!similarityResult?.topMatches?.length) {
+    return ''
+  }
+
+  const repeatedPhrases = getRepeatedSimilarityPhrases(
+    generatedText,
+    similarityResult.topMatches,
+  )
+  const matchedExamples = similarityResult.topMatches
+    .map((match, index) => {
+      const snippet = Array.from(match.content).slice(0, 180).join('')
+      return `${index + 1}. 유사도 ${Math.round(match.score * 100)}%: ${snippet}`
+    })
+    .join('\n')
+  const repeatedPhraseText = repeatedPhrases.length
+    ? `\n반복 금지 표현 조각: ${repeatedPhrases.join(' / ')}`
+    : ''
+
+  return [
+    `[차별화 재작성 지시 ${attemptNumber}]`,
+    `방금 생성문이 같은 학급 기존 문장과 ${Math.round(
+      similarityResult.maxScore * 100,
+    )}% 유사했습니다. 최종 문장은 기존 문장과 체감 유사도 30% 이하가 되도록 다시 작성하세요.`,
+    '활동 순서와 2문장 구조는 유지하되, 첫 문장의 연결 방식, 두 번째 문장의 시작, 마무리 관점, 역량/품성 표현을 모두 바꾸세요.',
+    '아래 기존 문장과 같은 구절, 같은 마무리, 같은 "생활 속/학교생활 속/이어 가려 함" 전개를 반복하지 마세요.',
+    matchedExamples,
+    repeatedPhraseText,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 function isQualityAllowedForActivity(quality, activityContent) {
   const rule = QUALITY_ACTIVITY_KEYWORD_REQUIREMENTS.find((candidate) =>
     candidate.qualities.includes(quality),
@@ -1253,7 +1390,12 @@ function SchoolLifeRecordsInput({
     }))
   }
 
-  function createRecordPrompt(section, currentText, selectedActivityRows = []) {
+  function createRecordPrompt(
+    section,
+    currentText,
+    selectedActivityRows = [],
+    diversityInstruction = '',
+  ) {
     const memo = currentText.trim()
     const studentContext = `${selectedStudent.grade}학년 ${selectedStudent.class_num}반 ${selectedStudent.student_num}번`
     const isSelfGovernmentSection = section.id === SELF_GOVERNMENT_SECTION_ID
@@ -1332,10 +1474,40 @@ function SchoolLifeRecordsInput({
       isSelfGovernmentSection && qualityExpressionContext
         ? `[역량/품성별 표현 방향]\n${qualityExpressionContext}`
         : '',
-      memo ? `참고 메모: ${memo}` : `참고 메모: ${section.fallbackMemo}`,
+      diversityInstruction,
+      memo && isSelfGovernmentSection
+        ? `기존 입력 내용은 그대로 베끼지 말고 필요한 사실만 참고하세요. 같은 문장 구조와 마무리는 반복하지 마세요: ${memo}`
+        : '',
+      memo && !isSelfGovernmentSection ? `참고 메모: ${memo}` : '',
+      !memo ? `참고 메모: ${section.fallbackMemo}` : '',
     ]
       .filter(Boolean)
       .join('\n')
+  }
+
+  async function requestGeneratedRecordText(prompt) {
+    const response = await fetch('/api/gemini', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+      }),
+    })
+    const contentType = response.headers.get('content-type') ?? ''
+    const data = contentType.includes('application/json')
+      ? await response.json()
+      : {
+          error:
+            'Gemini API 함수에 연결하지 못했습니다. Cloudflare Pages 환경에서 GEMINI_API_KEY를 설정해 주세요.',
+        }
+
+    if (!response.ok) {
+      throw new Error(data?.error ?? 'Gemini 응답을 불러오지 못했습니다.')
+    }
+
+    return cleanGeneratedRecordText(data.text)
   }
 
   async function handleGenerateRecord(section) {
@@ -1365,47 +1537,128 @@ function SchoolLifeRecordsInput({
     setSectionGenerationState(section.id, true)
 
     try {
-      const response = await fetch('/api/gemini', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: createRecordPrompt(section, currentText, selectedActivityRows),
-        }),
-      })
-      const contentType = response.headers.get('content-type') ?? ''
-      const data = contentType.includes('application/json')
-        ? await response.json()
-        : {
-            error:
-              'Gemini API 함수에 연결하지 못했습니다. Cloudflare Pages 환경에서 GEMINI_API_KEY를 설정해 주세요.',
-          }
+      let comparableRows = []
 
-      if (!response.ok) {
-        throw new Error(data?.error ?? 'Gemini 응답을 불러오지 못했습니다.')
+      if (isSelfGovernmentSection) {
+        const { data, error } = await fetchComparableSchoolLifeRecordRows({
+          classNum: selectedStudent.class_num,
+          grade: selectedStudent.grade,
+          schoolYear: DEFAULT_ACTIVITY_YEAR,
+          sectionId: section.id,
+          studentId: selectedStudent.id,
+        })
+
+        if (error) {
+          showRemoteStorageError(error)
+        } else {
+          comparableRows = data ?? []
+        }
       }
 
-      const generatedText = cleanGeneratedRecordText(data.text)
-
-      const isValidGeneratedText =
-        isLikelyKoreanRecordText(generatedText, isSelfGovernmentSection) &&
+      const isValidGeneratedText = (text) =>
+        isLikelyKoreanRecordText(text, isSelfGovernmentSection) &&
         (!isSelfGovernmentSection ||
           (isGeneratedRecordGroundedInActivities(
-            generatedText,
+            text,
             selectedActivityRows,
           ) &&
             isGeneratedRecordStructuredByActivityPairs(
-              generatedText,
+              text,
               selectedActivityRows,
             ) &&
             !hasMechanicalQualityLabeling(
-              generatedText,
+              text,
               selectedQualityWords,
             ) &&
-            !hasRepeatedGenericClosing(generatedText)))
+            !hasRepeatedGenericClosing(text)))
 
-      if (!isValidGeneratedText) {
+      let bestCandidate = null
+      let bestSimilarityResult = {
+        isTooSimilar: false,
+        maxScore: 0,
+        topMatches: [],
+      }
+      let diversityInstruction = ''
+
+      for (
+        let attempt = 0;
+        attempt <= MAX_DIVERSITY_REPAIR_ATTEMPTS;
+        attempt += 1
+      ) {
+        const generatedText = await requestGeneratedRecordText(
+          createRecordPrompt(
+            section,
+            currentText,
+            selectedActivityRows,
+            diversityInstruction,
+          ),
+        )
+
+        if (!isValidGeneratedText(generatedText)) {
+          continue
+        }
+
+        const similarityResult = isSelfGovernmentSection
+          ? getRecordSimilarityResult(generatedText, comparableRows)
+          : { isTooSimilar: false, maxScore: 0, topMatches: [] }
+
+        if (
+          !bestCandidate ||
+          similarityResult.maxScore < bestSimilarityResult.maxScore
+        ) {
+          bestCandidate = generatedText
+          bestSimilarityResult = similarityResult
+        }
+
+        if (!similarityResult.isTooSimilar) {
+          break
+        }
+
+        diversityInstruction = createDiversityInstruction(
+          generatedText,
+          similarityResult,
+          attempt + 1,
+        )
+      }
+
+      if (
+        isSelfGovernmentSection &&
+        bestCandidate &&
+        bestSimilarityResult.isTooSimilar
+      ) {
+        const fallbackText = buildSelfGovernmentFallbackRecord(
+          selectedActivityRows,
+          schoolLifeQualities,
+        )
+        const fallbackSimilarityResult = getRecordSimilarityResult(
+          fallbackText,
+          comparableRows,
+        )
+
+        if (
+          isValidGeneratedText(fallbackText) &&
+          fallbackSimilarityResult.maxScore < bestSimilarityResult.maxScore
+        ) {
+          bestCandidate = fallbackText
+          bestSimilarityResult = fallbackSimilarityResult
+        }
+      }
+
+      if (!bestCandidate && isSelfGovernmentSection) {
+        const fallbackText = buildSelfGovernmentFallbackRecord(
+          selectedActivityRows,
+          schoolLifeQualities,
+        )
+        const fallbackSimilarityResult = getRecordSimilarityResult(
+          fallbackText,
+          comparableRows,
+        )
+
+        bestCandidate = fallbackText
+        bestSimilarityResult = fallbackSimilarityResult
+      }
+
+      if (!bestCandidate || !isValidGeneratedText(bestCandidate)) {
         if (isSelfGovernmentSection) {
           const fallbackText = buildSelfGovernmentFallbackRecord(
             selectedActivityRows,
@@ -1413,16 +1666,28 @@ function SchoolLifeRecordsInput({
           )
 
           updateRecordValue(section.id, fallbackText)
-          onToast?.(
-            `${selectedStudent.name} 학생의 자율자치 활동 문장을 활동 주제에 맞춰 보정했습니다.`,
-          )
+          onToast?.(`${selectedStudent.name} 학생의 자율자치 활동 문장을 보정했습니다.`)
           return
         }
 
         throw new Error('한국어 생활기록부 문장으로 생성되지 않았습니다.')
       }
 
-      updateRecordValue(section.id, generatedText)
+      updateRecordValue(section.id, bestCandidate)
+
+      if (isSelfGovernmentSection && comparableRows.length) {
+        const similarityPercent = Math.round(bestSimilarityResult.maxScore * 100)
+        const similarityMessage =
+          bestSimilarityResult.maxScore > MAX_RECORD_SIMILARITY
+            ? ` 가장 낮은 유사도 후보(${similarityPercent}%)를 적용했습니다.`
+            : ` 기존 문장과 유사도 ${similarityPercent}%로 생성했습니다.`
+
+        onToast?.(
+          `${selectedStudent.name} 학생의 ${section.label} 문장을 생성했습니다.${similarityMessage}`,
+        )
+        return
+      }
+
       onToast?.(`${selectedStudent.name} 학생의 ${section.label} 문장을 생성했습니다.`)
     } catch (error) {
       if (isSelfGovernmentSection) {
